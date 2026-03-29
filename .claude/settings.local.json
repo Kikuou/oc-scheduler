@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//Users/toru/Downloads/**)",
-      "Bash(python3:*)"
-    ]
-  }
-}
