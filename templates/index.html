@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}開催管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">開催管理</h2>
+  <button class="btn btn-primary no-print" data-bs-toggle="modal" data-bs-target="#newOccasionModal">
+    新規開催を作成
+  </button>
+</div>
+
+{% if occasions %}
+<div class="row row-cols-1 row-cols-md-3 g-3">
+  {% for o in occasions %}
+  <div class="col">
+    <div class="card h-100 shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title">{{ o.name }}</h5>
+        <p class="card-text text-muted mb-1">{{ o.year }}年度 / {{ o.date }}</p>
+        <p class="card-text small mb-1">
+          <span class="badge bg-secondary">{{ o.day_start_time }}〜{{ o.day_end_time }}</span>
+        </p>
+        {% if o.occasion_program_lanes %}
+        <p class="card-text small mb-1">
+          <span class="text-muted">実施枠：</span>
+          {% for opl in o.occasion_program_lanes %}
+          <span class="badge bg-info text-dark me-1">{{ opl.program_lane.name }}</span>
+          {% endfor %}
+        </p>
+        {% endif %}
+        {% if o.note %}<p class="card-text small text-muted">{{ o.note }}</p>{% endif %}
+      </div>
+      <div class="card-footer d-flex gap-2 no-print">
+        <a href="/occasion/{{ o.id }}" class="btn btn-primary btn-sm flex-grow-1">スケジュール管理</a>
+        <a href="/report/{{ o.id }}" class="btn btn-outline-secondary btn-sm">帳票出力</a>
+        <button class="btn btn-outline-secondary btn-sm"
+                onclick="openEditOccasion({{ o.id }}, {{ o.year }}, '{{ o.date }}', '{{ o.name }}', '{{ o.note or '' }}', '{{ o.day_start_time }}', '{{ o.day_end_time }}', {{ o.program_lane_ids | tojson }})">
+          編集
+        </button>
+        <form method="post" action="/occasion/{{ o.id }}/delete" class="d-inline"
+              onsubmit="return confirm('「{{ o.name }}」とすべてのイベントを削除しますか？')">
+          <button class="btn btn-outline-danger btn-sm">削除</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center text-muted py-5">
+  <p>開催がありません。「新規開催を作成」から始めてください。</p>
+</div>
+{% endif %}
+
+{# 新規開催モーダル #}
+<div class="modal fade" id="newOccasionModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">新規開催作成</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form method="post" action="/occasion/new">
+        <div class="modal-body">
+          <div class="row g-2 mb-2">
+            <div class="col-4"><label class="form-label">年度</label>
+              <input type="number" name="year" class="form-control" value="{{ current_year }}" required>
+            </div>
+            <div class="col-8"><label class="form-label">開催日</label>
+              <input type="date" name="date" class="form-control" required>
+            </div>
+          </div>
+          <div class="mb-2"><label class="form-label">名称（例：8月OC）</label>
+            <input type="text" name="name" class="form-control" placeholder="8月OC" required>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6"><label class="form-label">開始時刻</label>
+              <input type="time" name="day_start_time" class="form-control" value="09:00" required>
+            </div>
+            <div class="col-6"><label class="form-label">終了時刻</label>
+              <input type="time" name="day_end_time" class="form-control" value="17:00" required>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">使用実施枠（スケジュール表の列）</label>
+            <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+              {% for pl in program_lanes %}
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="program_lane_ids" value="{{ pl.id }}" id="npl_{{ pl.id }}" checked>
+                <label class="form-check-label" for="npl_{{ pl.id }}">{{ pl.name }}</label>
+              </div>
+              {% else %}
+              <p class="text-muted small mb-0">実施枠がありません。<a href="/master?tab=lane">マスタ管理</a>から追加してください。</p>
+              {% endfor %}
+            </div>
+            <small class="text-muted">チェックした実施枠がスケジュール表の列になります</small>
+          </div>
+          <div class="mb-2"><label class="form-label">備考</label>
+            <input type="text" name="note" class="form-control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">作成</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# 編集モーダル #}
+<div class="modal fade" id="editOccasionModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">開催編集</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="editOccasionForm" method="post">
+        <div class="modal-body">
+          <div class="row g-2 mb-2">
+            <div class="col-4"><label class="form-label">年度</label><input type="number" name="year" id="eo_year" class="form-control" required></div>
+            <div class="col-8"><label class="form-label">開催日</label><input type="date" name="date" id="eo_date" class="form-control" required></div>
+          </div>
+          <div class="mb-2"><label class="form-label">名称</label><input type="text" name="name" id="eo_name" class="form-control" required></div>
+          <div class="row g-2 mb-2">
+            <div class="col-6"><label class="form-label">開始時刻</label>
+              <input type="time" name="day_start_time" id="eo_start_time" class="form-control" required>
+            </div>
+            <div class="col-6"><label class="form-label">終了時刻</label>
+              <input type="time" name="day_end_time" id="eo_end_time" class="form-control" required>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">使用実施枠（スケジュール表の列）</label>
+            <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+              {% for pl in program_lanes %}
+              <div class="form-check">
+                <input class="form-check-input lane-edit-cb" type="checkbox" name="program_lane_ids" value="{{ pl.id }}" id="epl_{{ pl.id }}">
+                <label class="form-check-label" for="epl_{{ pl.id }}">{{ pl.name }}</label>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="mb-2"><label class="form-label">備考</label><input type="text" name="note" id="eo_note" class="form-control"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openEditOccasion(id, year, date, name, note, startTime, endTime, laneIds) {
+  document.getElementById('editOccasionForm').action = '/occasion/' + id + '/edit';
+  document.getElementById('eo_year').value = year;
+  document.getElementById('eo_date').value = date;
+  document.getElementById('eo_name').value = name;
+  document.getElementById('eo_note').value = note;
+  document.getElementById('eo_start_time').value = startTime;
+  document.getElementById('eo_end_time').value = endTime;
+
+  document.querySelectorAll('.lane-edit-cb').forEach(cb => {
+    cb.checked = laneIds.includes(parseInt(cb.value));
+  });
+
+  new bootstrap.Modal(document.getElementById('editOccasionModal')).show();
+}
+</script>
+{% endblock %}

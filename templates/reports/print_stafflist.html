@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>担当者一覧 - {{ occasion.name }}</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    body { font-family: "Hiragino Kaku Gothic Pro", "MS Gothic", sans-serif; font-size: 9pt; margin: 0; }
+    .page-title { font-size: 11pt; font-weight: bold; margin-bottom: 5mm; border-bottom: 1px solid #333; padding-bottom: 2mm; }
+    .section-header {
+      background: #2b3035; color: #fff; font-weight: bold;
+      padding: 2px 6px; margin-top: 5mm; margin-bottom: 2mm; font-size: 9.5pt;
+    }
+    .sub-header { font-weight: bold; font-size: 8.5pt; margin: 3mm 0 1mm 4mm; color: #444; }
+    .person-name { font-weight: bold; margin: 2mm 0 1mm 8mm; font-size: 9pt; }
+    .event-row { margin: 0.5mm 0 0 20mm; font-size: 8pt; color: #333; }
+    .event-row .time { color: #000; font-weight: bold; margin-right: 2mm; }
+    .event-row .venue { margin-right: 2mm; }
+    .event-row .role { color: #555; }
+    .no-print-btn { position: fixed; top: 5mm; right: 5mm; }
+    @media print { .no-print-btn { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="no-print-btn">
+    <button onclick="window.print()" style="padding:6px 12px;cursor:pointer;">印刷</button>
+    <button onclick="window.close()" style="padding:6px 12px;cursor:pointer;margin-left:4px;">閉じる</button>
+  </div>
+
+  <div class="page-title">
+    担当者一覧　{{ occasion.year }}年度 {{ occasion.name }}（{{ occasion.date }}）
+  </div>
+
+{% for staff_type in staff_order %}
+  {% if staff_type in groups %}
+  <div class="section-header">{{ staff_type }}</div>
+
+  {% for (dept, grade), staff_events in groups[staff_type].items() | sort %}
+    {% if staff_type == '学生' %}
+    <div class="sub-header">《{{ dept }}{% if grade %} {{ grade }}年{% endif %}》</div>
+    {% endif %}
+
+    {% for sid, evs in staff_events.items() | sort(attribute='0') %}
+      {% set s = staff_info[sid] %}
+      <div class="person-name">
+        ■ {{ s.name }}
+        {% if s.department and staff_type != '学生' %}（{{ s.department }}）{% endif %}
+      </div>
+      {% for a in evs | sort(attribute='event.start_time') %}
+      <div class="event-row">
+        <span class="time">{{ a.event.start_time }}–{{ a.event.end_time }}</span>
+        <span class="venue">{{ a.event.venue.name }}</span>
+        {{ a.event.title }}
+        <span class="role">（{{ a.role.name }}）</span>
+        {% if a.event.note %}<span style="color:#777;">／{{ a.event.note }}</span>{% endif %}
+      </div>
+      {% endfor %}
+    {% endfor %}
+  {% endfor %}
+  {% endif %}
+{% endfor %}
+</body>
+</html>

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}帳票出力 — {{ occasion.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="/occasion/{{ occasion.id }}" class="btn btn-outline-secondary btn-sm">← スケジュール</a>
+  <h4 class="mb-0">帳票出力
+    <span class="text-muted fw-normal fs-6 ms-2">{{ occasion.year }}年度 {{ occasion.name }}（{{ occasion.date }}）</span>
+  </h4>
+</div>
+
+<div class="row g-4">
+
+  {# ─── ① スケジュール表印刷 ─── #}
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-header fw-bold">🖨 スケジュール表（配布用）</div>
+      <div class="card-body">
+
+        {# 実施枠選択 #}
+        <div class="mb-3">
+          <label class="form-label fw-bold small mb-1">表示する実施枠</label>
+          <div class="d-flex flex-wrap gap-3 border rounded p-2 bg-light" id="lane-check-group">
+            {% for lane in lanes %}
+            <div class="form-check mb-0">
+              <input class="form-check-input lane-cb" type="checkbox"
+                     value="{{ lane.id }}" id="lc_{{ lane.id }}"
+                     {{ 'checked' if lane.get('is_visible', True) }}>
+              <label class="form-check-label" for="lc_{{ lane.id }}">{{ lane.name }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="form-text">複数選択可。4列ごとに自動でページ分割されます。</div>
+        </div>
+
+        {# 印刷ボタン #}
+        <div class="d-flex gap-2 flex-wrap">
+          <button class="btn btn-primary" onclick="openPrint()">
+            🖨 スケジュール表を印刷
+          </button>
+          <a href="/report/{{ occasion.id }}/print/stafflist" target="_blank"
+             class="btn btn-outline-secondary">
+            📋 担当者一覧を印刷
+          </a>
+        </div>
+
+      </div>{# /card-body #}
+    </div>{# /card #}
+  </div>
+
+</div>{# /row #}
+
+<script>
+const OCCASION_ID = {{ occasion.id }};
+const TIME_SLOTS_30 = {{ time_slots_30 | tojson }};
+
+// ── ページロード時にスケジューラの選択状態を反映 ──
+document.addEventListener('DOMContentLoaded', function() {
+  const visibleLanes = JSON.parse(localStorage.getItem(`occasion_${OCCASION_ID}_visible_lanes`) || '[]');
+  if (visibleLanes.length > 0) {
+    // LocalStorageに保存されている場合、それを反映
+    document.querySelectorAll('.lane-cb').forEach(cb => {
+      cb.checked = visibleLanes.includes(parseInt(cb.value));
+    });
+  } else {
+    // LocalStorageにない場合は、サーバーから取得したis_visibleをそのまま使用（現在の仕様）
+    // チェックボックスはテンプレートで既に初期化済み
+  }
+});
+
+// ── 印刷URLを構築して開く ──
+function openPrint() {
+  const lanes = [...document.querySelectorAll('.lane-cb:checked')].map(cb => cb.value);
+  if (lanes.length === 0) {
+    alert('実施枠を1つ以上選択してください。');
+    return;
+  }
+  let url = `/report/${OCCASION_ID}/print?lanes=${lanes.join(',')}`;
+  window.open(url, '_blank');
+}
+</script>
+{% endblock %}

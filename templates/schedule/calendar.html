@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}{{ occasion.name }} カレンダー{% endblock %}
+
+{% block content %}
+<style>
+  /* カレンダー全体 */
+  #calendar-wrap { margin: 0 -12px; }
+  .fc { font-size: 0.85rem; }
+  .fc .fc-col-header-cell-cushion { font-weight: bold; }
+  .fc-event { cursor: pointer; border-radius: 3px; padding: 2px 4px; }
+  .fc-event .fc-event-title { white-space: normal; font-size: 0.8rem; }
+  .fc-timegrid-slot { height: 24px; }
+  .fc .fc-timegrid-slot-minor { border-top-style: dotted; }
+
+  /* 編集パネル */
+  #event-panel {
+    position: fixed; top: 0; right: -480px; width: 480px; height: 100vh;
+    background: #fff; box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+    z-index: 1060; transition: right 0.25s ease; overflow-y: auto;
+    padding: 20px;
+  }
+  #event-panel.open { right: 0; }
+  #event-panel .panel-header {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 16px;
+  }
+  #panel-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.3); z-index: 1055;
+  }
+  #panel-overlay.open { display: block; }
+
+  /* 担当者行 */
+  .asgn-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+  .asgn-row select { flex: 1; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-2 no-print">
+  <div>
+    <a href="/" class="btn btn-outline-secondary btn-sm">&larr; 開催一覧</a>
+    <h4 class="d-inline ms-2 mb-0">{{ occasion.year }}年度 {{ occasion.name }}（{{ occasion.date }}）</h4>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/occasion/{{ occasion.id }}" class="btn btn-outline-secondary btn-sm">表形式で見る</a>
+    <a href="/report/{{ occasion.id }}" class="btn btn-outline-primary btn-sm">帳票出力</a>
+  </div>
+</div>
+
+<div class="mb-2 no-print small text-muted">
+  空きエリアをドラッグしてイベント作成 ／ イベントをドラッグで移動 ／ 下端をドラッグで長さ変更 ／ クリックで編集
+</div>
+
+<div id="calendar-wrap">
+  <div id="calendar"></div>
+</div>
+
+{# ─── 編集サイドパネル ─── #}
+<div id="panel-overlay" onclick="closePanel()"></div>
+<div id="event-panel">
+  <div class="panel-header">
+    <h5 id="panel-title" class="mb-0">イベント登録</h5>
+    <button class="btn-close" onclick="closePanel()"></button>
+  </div>
+
+  <input type="hidden" id="p_event_id" value="">
+
+  <div class="mb-2">
+    <label class="form-label fw-bold small">タイトル *</label>
+    <input type="text" id="p_title" class="form-control form-control-sm" required>
+  </div>
+  <div class="row g-2 mb-2">
+    <div class="col-6">
+      <label class="form-label fw-bold small">学科区分</label>
+      <select id="p_department" class="form-select form-select-sm">
+        <option value="">共通</option>
+        <option value="食物">食物</option>
+        <option value="幼教">幼教</option>
+      </select>
+    </div>
+    <div class="col-6">
+      <label class="form-label fw-bold small">会場 *</label>
+      <select id="p_venue_id" class="form-select form-select-sm">
+        {% for v in venues %}
+        <option value="{{ v.id }}">{{ v.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+  <div class="row g-2 mb-2">
+    <div class="col-4">
+      <label class="form-label fw-bold small">開始 *</label>
+      <input type="time" id="p_start_time" class="form-control form-control-sm">
+    </div>
+    <div class="col-4">
+      <label class="form-label fw-bold small">所要時間(分) *</label>
+      <input type="number" id="p_duration_min" class="form-control form-control-sm" value="30" min="10" step="10">
+    </div>
+    <div class="col-4">
+      <label class="form-label fw-bold small">終了</label>
+      <input type="text" id="p_end_time" class="form-control form-control-sm" readonly>
+    </div>
+  </div>
+  <div class="mb-2">
+    <label class="form-label fw-bold small">備考</label>
+    <input type="text" id="p_note" class="form-control form-control-sm">
+  </div>
+
+  {# テンプレート適用 #}
+  <div class="mb-2">
+    <label class="form-label fw-bold small">テンプレートから適用</label>
+    <select id="p_template" class="form-select form-select-sm" onchange="applyTemplate()">
+      <option value="">選択...</option>
+      {% for t in templates %}
+      <option value="{{ t.title }}" data-dur="{{ t.duration_min or '' }}" data-dept="{{ t.department or '' }}">
+        {{ t.title }}{% if t.department %} ({{ t.department }}){% endif %}{% if t.duration_min %} {{ t.duration_min }}分{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {# 担当者割当 #}
+  <div class="mb-3">
+    <label class="form-label fw-bold small">担当者割当</label>
+    <div id="p_assignments"></div>
+    <button type="button" class="btn btn-outline-primary btn-sm mt-1" onclick="addAssignment()">+ 担当者追加</button>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button class="btn btn-primary btn-sm flex-fill" onclick="saveEvent()">保存</button>
+    <button class="btn btn-secondary btn-sm" onclick="closePanel()">キャンセル</button>
+    <button class="btn btn-danger btn-sm" id="btn-delete" style="display:none" onclick="deleteEvent()">削除</button>
+  </div>
+</div>
+
+{# データ #}
+<script>
+const OCCASION_ID = {{ occasion.id }};
+const OCCASION_DATE = "{{ occasion.date }}";
+const STAFF_LIST = [
+  {% for s in staff_list %}
+  {id: {{ s.id }}, name: "{{ s.name }}", type: "{{ s.staff_type }}", dept: "{{ s.department or '' }}", grade: {{ s.grade or 'null' }}},
+  {% endfor %}
+];
+const ROLES = [
+  {% for r in roles %}
+  {id: {{ r.id }}, name: "{{ r.name }}"},
+  {% endfor %}
+];
+</script>
+{% endblock %}
+
+{% block scripts %}
+{# FullCalendar CDN #}
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.17/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.17/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.17/locales/ja.global.min.js"></script>
+
+<script>
+// ─── FullCalendar セットアップ ────────────────────────────────
+let calendar;
+document.addEventListener('DOMContentLoaded', function() {
+  const el = document.getElementById('calendar');
+  calendar = new FullCalendar.Calendar(el, {
+    locale: 'ja',
+    initialView: 'timeGridDay',
+    initialDate: OCCASION_DATE,
+    headerToolbar: { left: '', center: 'title', right: '' },
+    allDaySlot: false,
+    slotMinTime: '08:00:00',
+    slotMaxTime: '19:00:00',
+    slotDuration: '00:10:00',
+    slotLabelInterval: '00:30:00',
+    slotLabelFormat: { hour: '2-digit', minute: '2-digit', hour12: false },
+    height: 'auto',
+    expandRows: true,
+    nowIndicator: false,
+
+    // ドラッグ作成
+    selectable: true,
+    selectMirror: true,
+    select: function(info) {
+      openPanelForNew(
+        info.startStr.substring(11, 16),
+        info.endStr.substring(11, 16)
+      );
+      calendar.unselect();
+    },
+
+    // ドラッグ移動
+    editable: true,
+    eventDrop: function(info) {
+      const ev = info.event;
+      const startTime = ev.startStr.substring(11, 16);
+      const endTime = ev.endStr.substring(11, 16);
+      fetch(`/api/event/${ev.id}/move`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ start_time: startTime, end_time: endTime })
+      });
+    },
+
+    // リサイズ
+    eventResize: function(info) {
+      const ev = info.event;
+      const startTime = ev.startStr.substring(11, 16);
+      const endTime = ev.endStr.substring(11, 16);
+      fetch(`/api/event/${ev.id}/move`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ start_time: startTime, end_time: endTime })
+      });
+    },
+
+    // クリック→編集
+    eventClick: function(info) {
+      openPanelForEdit(info.event);
+    },
+
+    // カスタム描画
+    eventContent: function(arg) {
+      const props = arg.event.extendedProps;
+      let html = `<div style="font-weight:bold;font-size:0.8rem">${arg.event.title}</div>`;
+      html += `<div style="font-size:0.72rem;color:#555">${props.venue_name || ''}</div>`;
+      if (props.assignments) {
+        props.assignments.slice(0, 3).forEach(a => {
+          html += `<div style="font-size:0.7rem;color:#666">${a.role_name}: ${a.staff_name}</div>`;
+        });
+        if (props.assignments.length > 3) {
+          html += `<div style="font-size:0.7rem;color:#999">+${props.assignments.length - 3}名</div>`;
+        }
+      }
+      return { html };
+    },
+
+    // イベントソース
+    events: `/api/occasion/${OCCASION_ID}/events`,
+  });
+  calendar.render();
+});
+
+
+// ─── サイドパネル操作 ─────────────────────────────────────────
+function openPanel() {
+  document.getElementById('event-panel').classList.add('open');
+  document.getElementById('panel-overlay').classList.add('open');
+}
+function closePanel() {
+  document.getElementById('event-panel').classList.remove('open');
+  document.getElementById('panel-overlay').classList.remove('open');
+}
+
+function calcEndTimePanel() {
+  const start = document.getElementById('p_start_time').value;
+  const dur = parseInt(document.getElementById('p_duration_min').value);
+  if (!start || isNaN(dur)) { document.getElementById('p_end_time').value = ''; return; }
+  const [h, m] = start.split(':').map(Number);
+  const total = h * 60 + m + dur;
+  document.getElementById('p_end_time').value =
+    String(Math.floor(total / 60)).padStart(2, '0') + ':' + String(total % 60).padStart(2, '0');
+}
+document.getElementById('p_start_time').addEventListener('change', calcEndTimePanel);
+document.getElementById('p_duration_min').addEventListener('change', calcEndTimePanel);
+
+function openPanelForNew(startTime, endTime) {
+  document.getElementById('panel-title').textContent = 'イベント登録';
+  document.getElementById('p_event_id').value = '';
+  document.getElementById('p_title').value = '';
+  document.getElementById('p_department').value = '';
+  document.getElementById('p_venue_id').selectedIndex = 0;
+  document.getElementById('p_start_time').value = startTime || '';
+  document.getElementById('p_note').value = '';
+  document.getElementById('p_template').value = '';
+  document.getElementById('btn-delete').style.display = 'none';
+
+  if (startTime && endTime) {
+    const [h1, m1] = startTime.split(':').map(Number);
+    const [h2, m2] = endTime.split(':').map(Number);
+    const dur = (h2 * 60 + m2) - (h1 * 60 + m1);
+    document.getElementById('p_duration_min').value = dur > 0 ? dur : 30;
+  } else {
+    document.getElementById('p_duration_min').value = 30;
+  }
+  calcEndTimePanel();
+  document.getElementById('p_assignments').innerHTML = '';
+  addAssignment();
+  openPanel();
+  setTimeout(() => document.getElementById('p_title').focus(), 300);
+}
+
+function openPanelForEdit(fcEvent) {
+  const props = fcEvent.extendedProps;
+  document.getElementById('panel-title').textContent = 'イベント編集';
+  document.getElementById('p_event_id').value = fcEvent.id;
+  document.getElementById('p_title').value = fcEvent.title;
+  document.getElementById('p_department').value = props.department || '';
+  document.getElementById('p_venue_id').value = props.venue_id;
+  document.getElementById('p_start_time').value = props.start_time;
+  document.getElementById('p_duration_min').value = props.duration_min;
+  document.getElementById('p_note').value = props.note || '';
+  document.getElementById('p_template').value = '';
+  document.getElementById('btn-delete').style.display = 'inline-block';
+  calcEndTimePanel();
+
+  // 担当者
+  const container = document.getElementById('p_assignments');
+  container.innerHTML = '';
+  if (props.assignments && props.assignments.length > 0) {
+    props.assignments.forEach(a => addAssignment(a.staff_id, a.role_id));
+  } else {
+    addAssignment();
+  }
+  openPanel();
+}
+
+
+// ─── 担当者行 ────────────────────────────────────────────────
+function addAssignment(staffId, roleId) {
+  const container = document.getElementById('p_assignments');
+  const div = document.createElement('div');
+  div.className = 'asgn-row';
+
+  let staffOpts = '<option value="">担当者...</option>';
+  STAFF_LIST.forEach(s => {
+    const label = `${s.name}（${s.type}${s.dept ? '・' + s.dept : ''}${s.grade ? s.grade + '年' : ''}）`;
+    staffOpts += `<option value="${s.id}" ${s.id == staffId ? 'selected' : ''}>${label}</option>`;
+  });
+
+  let roleOpts = '<option value="">役割...</option>';
+  ROLES.forEach(r => {
+    roleOpts += `<option value="${r.id}" ${r.id == roleId ? 'selected' : ''}>${r.name}</option>`;
+  });
+
+  div.innerHTML = `
+    <select class="form-select form-select-sm asgn-staff">${staffOpts}</select>
+    <select class="form-select form-select-sm asgn-role">${roleOpts}</select>
+    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.parentElement.remove()">&times;</button>
+  `;
+  container.appendChild(div);
+}
+
+function getAssignments() {
+  const rows = document.querySelectorAll('.asgn-row');
+  const result = [];
+  rows.forEach(row => {
+    const staffId = row.querySelector('.asgn-staff').value;
+    const roleId = row.querySelector('.asgn-role').value;
+    if (staffId && roleId) result.push({ staff_id: parseInt(staffId), role_id: parseInt(roleId) });
+  });
+  return result;
+}
+
+
+// ─── テンプレート適用 ─────────────────────────────────────────
+function applyTemplate() {
+  const sel = document.getElementById('p_template');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt.value) return;
+  document.getElementById('p_title').value = opt.value;
+  const dur = opt.dataset.dur;
+  if (dur) {
+    document.getElementById('p_duration_min').value = dur;
+    calcEndTimePanel();
+  }
+}
+
+
+// ─── 保存・削除 ──────────────────────────────────────────────
+async function saveEvent() {
+  const eventId = document.getElementById('p_event_id').value;
+  const title = document.getElementById('p_title').value.trim();
+  const venueId = document.getElementById('p_venue_id').value;
+  const startTime = document.getElementById('p_start_time').value;
+  const durationMin = document.getElementById('p_duration_min').value;
+
+  if (!title || !venueId || !startTime || !durationMin) {
+    alert('タイトル、会場、開始時刻、所要時間は必須です');
+    return;
+  }
+
+  const body = {
+    occasion_id: OCCASION_ID,
+    title: title,
+    venue_id: parseInt(venueId),
+    start_time: startTime,
+    duration_min: parseInt(durationMin),
+    department: document.getElementById('p_department').value || null,
+    note: document.getElementById('p_note').value,
+    assignments: getAssignments(),
+  };
+
+  let url, method;
+  if (eventId) {
+    url = `/api/event/${eventId}/update`;
+  } else {
+    url = '/api/event/create';
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    closePanel();
+    calendar.refetchEvents();
+  } else {
+    alert('保存に失敗しました: ' + (data.error || ''));
+  }
+}
+
+async function deleteEvent() {
+  const eventId = document.getElementById('p_event_id').value;
+  if (!eventId) return;
+  if (!confirm('このイベントを削除しますか？')) return;
+
+  const res = await fetch(`/api/event/${eventId}/delete`, { method: 'POST' });
+  const data = await res.json();
+  if (data.ok) {
+    closePanel();
+    calendar.refetchEvents();
+  }
+}
+</script>
+{% endblock %}

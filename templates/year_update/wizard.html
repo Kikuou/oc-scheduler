@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}年度更新{% endblock %}
+
+{% block content %}
+<h2 class="mb-3">年度更新</h2>
+
+<div class="mb-3 no-print">
+  <div class="d-flex gap-3">
+    <span class="{{ 'fw-bold text-primary' if step == 1 else 'text-muted' }}">① 複製元選択</span>
+    <span>→</span>
+    <span class="{{ 'fw-bold text-primary' if step == 2 else 'text-muted' }}">② プレビュー・確認</span>
+    <span>→</span>
+    <span class="{{ 'fw-bold text-primary' if step == 3 else 'text-muted' }}">③ 実行</span>
+  </div>
+</div>
+
+{# ─── Step 1: 複製元選択 ─── #}
+{% if step == 1 %}
+<div class="card" style="max-width:500px;">
+  <div class="card-header fw-bold">① 複製元の開催を選択</div>
+  <div class="card-body">
+    <form method="post" action="/year-update/preview">
+      <div class="mb-3">
+        <label class="form-label">複製元の開催</label>
+        <select name="src_occasion_id" class="form-select" required>
+          <option value="">選択してください</option>
+          {% for o in occasions %}
+          <option value="{{ o.id }}">{{ o.year }}年度 {{ o.name }}（{{ o.date }}）</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary">次へ →</button>
+    </form>
+  </div>
+</div>
+
+{# ─── Step 2: プレビュー・確認 ─── #}
+{% elif step == 2 and preview %}
+<form method="post" action="/year-update/execute">
+  <input type="hidden" name="src_occasion_id" value="{{ src_id }}">
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header fw-bold">② 新年度の情報を入力</div>
+        <div class="card-body">
+          <p class="text-muted small">複製元：{{ preview.src.year }}年度 {{ preview.src.name }}</p>
+          <div class="mb-2">
+            <label class="form-label">新しい年度</label>
+            <input type="number" name="new_year" class="form-control" value="{{ current_year }}" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">開催日</label>
+            <input type="date" name="new_date" class="form-control" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">開催名称</label>
+            <input type="text" name="new_name" class="form-control" value="{{ preview.src.name }}" required>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-header fw-bold">コピーされるイベント（{{ preview.events | length }}件）</div>
+        <div class="card-body" style="max-height:200px;overflow-y:auto;">
+          <ul class="list-unstyled small">
+            {% for ev in preview.events %}
+            <li>{{ ev.start_time }}–{{ ev.end_time }} {{ ev.title }}（{{ ev.venue_name }}）</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    {% if preview.graduating %}
+    <div class="col-12">
+      <div class="card border-warning">
+        <div class="card-header fw-bold bg-warning">卒業候補（2年生 → 無効化）</div>
+        <div class="card-body">
+          <p class="small text-muted">チェックを入れた学生は残留させます（is_active=Trueを維持）</p>
+          <div class="row">
+            {% for s in preview.graduating %}
+            <div class="col-md-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="keep_student_id" value="{{ s.id }}" id="ks_{{ s.id }}">
+                <label class="form-check-label" for="ks_{{ s.id }}">
+                  {{ s.name }}{% if s.department %}<small class="text-muted">（{{ s.department }}）</small>{% endif %}
+                </label>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if preview.promoting %}
+    <div class="col-12">
+      <div class="card border-success">
+        <div class="card-header fw-bold bg-success text-white">学年繰上げ（1年 → 2年）</div>
+        <div class="card-body">
+          <div class="row">
+            {% for s in preview.promoting %}
+            <div class="col-md-3 small">{{ s.name }}{% if s.department %}（{{ s.department }}）{% endif %}</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-danger"
+              onclick="return confirm('年度更新を実行します。学生マスタが更新されます。よろしいですか？')">
+        年度更新を実行
+      </button>
+      <a href="/year-update" class="btn btn-secondary ms-2">戻る</a>
+    </div>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

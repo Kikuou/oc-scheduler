@@ -1,0 +1,683 @@
+{% extends "base.html" %}
+{% block title %}マスタ管理{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+  <h2 class="mb-0">マスタ管理</h2>
+  <small class="text-muted">行をドラッグして並び替えできます</small>
+</div>
+
+<ul class="nav nav-tabs mb-3 no-print" id="masterTab">
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab=='staff' %}active{% endif %}" href="?tab=staff">担当者</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab=='lane' %}active{% endif %}" href="?tab=lane">実施枠</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab=='venue' %}active{% endif %}" href="?tab=venue">会場</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab=='role' %}active{% endif %}" href="?tab=role">役割</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if active_tab=='template' %}active{% endif %}" href="?tab=template">内容テンプレート</a>
+  </li>
+</ul>
+
+{# ─── 担当者タブ ─── #}
+{% if active_tab == 'staff' %}
+
+{# CSV操作ボタン群 #}
+<div class="d-flex gap-2 mb-3 no-print">
+  <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#csvUploadModal">
+    CSV取込
+  </button>
+  <a href="/master/staff/csv-template" class="btn btn-outline-secondary">
+    CSVテンプレートDL
+  </a>
+</div>
+
+{# 一括削除ボタン群 #}
+<div class="d-flex gap-2 mb-3 no-print" id="bulk-delete-section-staff" style="display:none;">
+  <button class="btn btn-outline-secondary" id="btn-clear-selection-staff">
+    選択解除
+  </button>
+  <button class="btn btn-danger" id="btn-delete-selected-staff">
+    <i class="bi bi-trash"></i> 選択項目を削除
+  </button>
+  <span class="text-muted small align-self-center">
+    <span id="selection-count-staff">0</span>件選択
+  </span>
+</div>
+
+{# CSV取込モーダル #}
+<div class="modal fade" id="csvUploadModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">担当者CSV取込</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="/master/staff/csv-upload" enctype="multipart/form-data">
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            CSVファイルをアップロードすると内容をプレビューします。<br>
+            問題のない行のみ取り込むことができます。
+          </p>
+          <div class="mb-3">
+            <label class="form-label fw-bold">CSVファイルを選択</label>
+            <input type="file" name="csv_file" class="form-control" accept=".csv,text/csv" required>
+          </div>
+          <div class="alert alert-info small mb-0">
+            <strong>CSVの列：</strong>氏名, 区分, 所属詳細, 備考<br>
+            <strong>区分：</strong>教員 / 職員 / 学生<br>
+            <strong>所属詳細（学生）：</strong>食物栄養学科1年 / 食物栄養学科2年 / こども地域学科1年 / こども地域学科2年<br>
+            <strong>文字コード：</strong>UTF-8 または Shift-JIS（Excel保存形式）
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-success">プレビューを表示</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-header fw-bold">担当者追加（手動）</div>
+  <div class="card-body">
+    <form method="post" action="/master/staff/add" class="row g-2">
+      <div class="col-md-2">
+        <input type="text" name="name" class="form-control form-control-sm" placeholder="氏名*" required>
+      </div>
+      <div class="col-md-2">
+        <select name="staff_type" class="form-select form-select-sm" required>
+          <option value="">種別*</option>
+          {% for t in staff_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <select name="department" class="form-select form-select-sm">
+          <option value="">学科（任意）</option>
+          {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-1">
+        <select name="grade" class="form-select form-select-sm">
+          <option value="">学年</option>
+          <option value="1">1年</option>
+          <option value="2">2年</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <input type="text" name="note" class="form-control form-control-sm" placeholder="備考">
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-primary btn-sm w-100">追加</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<table class="table table-sm table-bordered master-table">
+  <thead>
+    <tr>
+      <th style="width:40px" class="no-print">
+        <input type="checkbox" id="checkbox-select-all-staff" class="checkbox-select-all form-check-input" style="cursor:pointer">
+      </th>
+      <th style="width:30px" class="no-print"></th>
+      <th>氏名</th><th>種別</th><th>学科</th><th>学年</th><th>備考</th><th>状態</th><th class="no-print">操作</th>
+    </tr>
+  </thead>
+  <tbody id="sortable-staff" data-model="staff">
+    {% for s in staff_list %}
+    <tr class="{{ '' if s.is_active else 'table-secondary text-muted' }}" data-id="{{ s.id }}">
+      <td class="no-print">
+        <input type="checkbox" class="row-checkbox form-check-input" value="{{ s.id }}" data-name="{{ s.name }}" style="cursor:pointer">
+      </td>
+      <td class="drag-handle no-print" style="cursor:grab;text-align:center">&#x2630;</td>
+      <td>{{ s.name }}</td>
+      <td>{{ s.staff_type }}</td>
+      <td>{{ s.department or '' }}</td>
+      <td>{{ s.grade ~ '年' if s.grade else '' }}</td>
+      <td>{{ s.note or '' }}</td>
+      <td>{{ '有効' if s.is_active else '無効' }}</td>
+      <td class="no-print" style="white-space:nowrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="openStaffEdit({{ s.id }}, '{{ s.name }}', '{{ s.staff_type }}', '{{ s.department or '' }}', '{{ s.grade or '' }}', '{{ s.note or '' }}')">編集</button>
+        <form method="post" action="/master/staff/{{ s.id }}/toggle" class="d-inline">
+          <button class="btn btn-outline-{{ 'warning' if s.is_active else 'success' }} btn-sm">{{ '無効化' if s.is_active else '有効化' }}</button>
+        </form>
+        <form method="post" action="/master/staff/{{ s.id }}/delete" class="d-inline"
+              onsubmit="return confirm('{{ s.name }} を削除しますか？担当割当データも削除されます。')">
+          <button class="btn btn-outline-danger btn-sm">削除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="text-center text-muted">担当者がいません</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{# 担当者編集モーダル #}
+<div class="modal fade" id="staffEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">担当者編集</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="staffEditForm" method="post">
+        <div class="modal-body">
+          <div class="mb-2"><label class="form-label">氏名</label><input type="text" name="name" id="edit_name" class="form-control" required></div>
+          <div class="mb-2"><label class="form-label">種別</label>
+            <select name="staff_type" id="edit_staff_type" class="form-select" required>
+              {% for t in staff_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="mb-2"><label class="form-label">学科</label>
+            <select name="department" id="edit_department" class="form-select">
+              <option value="">なし</option>
+              {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="mb-2"><label class="form-label">学年</label>
+            <select name="grade" id="edit_grade" class="form-select">
+              <option value="">なし</option><option value="1">1年</option><option value="2">2年</option>
+            </select>
+          </div>
+          <div class="mb-2"><label class="form-label">備考</label><input type="text" name="note" id="edit_note" class="form-control"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ─── 実施枠タブ ─── #}
+{% if active_tab == 'lane' %}
+<div class="card mb-3">
+  <div class="card-header fw-bold">実施枠追加</div>
+  <div class="card-body">
+    <form method="post" action="/master/lane/add" class="row g-2 align-items-end">
+      <div class="col-md-4"><input type="text" name="name" class="form-control form-control-sm" placeholder="実施枠名*（例：食物栄養学科）" required></div>
+      <div class="col-md-3">
+        <select name="lane_type" class="form-select form-select-sm">
+          <option value="normal">通常実施枠</option>
+          <option value="remark">備考枠</option>
+        </select>
+      </div>
+      <div class="col-md-2"><button class="btn btn-primary btn-sm w-100">追加</button></div>
+    </form>
+  </div>
+</div>
+
+{# 一括削除ボタン群 #}
+<div class="d-flex gap-2 mb-3 no-print" id="bulk-delete-section-lane" style="display:none;">
+  <button class="btn btn-outline-secondary" id="btn-clear-selection-lane">
+    選択解除
+  </button>
+  <button class="btn btn-danger" id="btn-delete-selected-lane">
+    <i class="bi bi-trash"></i> 選択項目を削除
+  </button>
+  <span class="text-muted small align-self-center">
+    <span id="selection-count-lane">0</span>件選択
+  </span>
+</div>
+
+<table class="table table-sm table-bordered master-table">
+  <thead><tr><th style="width:40px" class="no-print"><input type="checkbox" id="checkbox-select-all-lane" class="checkbox-select-all form-check-input" style="cursor:pointer"></th><th style="width:30px" class="no-print"></th><th>実施枠名</th><th>種別</th><th>状態</th><th class="no-print">操作</th></tr></thead>
+  <tbody id="sortable-lane" data-model="lane">
+    {% for pl in program_lanes %}
+    <tr class="{{ '' if pl.is_active else 'table-secondary text-muted' }}" data-id="{{ pl.id }}">
+      <td class="no-print"><input type="checkbox" class="row-checkbox form-check-input" value="{{ pl.id }}" data-name="{{ pl.name }}" style="cursor:pointer"></td>
+      <td class="drag-handle no-print" style="cursor:grab;text-align:center">&#x2630;</td>
+      <td>{{ pl.name }}</td>
+      <td>
+        {% if pl.lane_type == 'remark' %}
+        <span class="badge bg-info text-dark">備考枠</span>
+        {% else %}
+        <span class="badge bg-secondary">通常</span>
+        {% endif %}
+      </td>
+      <td>{{ '有効' if pl.is_active else '無効' }}</td>
+      <td class="no-print" style="white-space:nowrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="openLaneEdit({{ pl.id }}, '{{ pl.name }}', '{{ pl.lane_type }}')">編集</button>
+        <form method="post" action="/master/lane/{{ pl.id }}/toggle" class="d-inline">
+          <button class="btn btn-outline-{{ 'warning' if pl.is_active else 'success' }} btn-sm">{{ '無効化' if pl.is_active else '有効化' }}</button>
+        </form>
+        <form method="post" action="/master/lane/{{ pl.id }}/delete" class="d-inline"
+              onsubmit="return confirm('「{{ pl.name }}」を削除しますか？関連イベントの実施枠が未設定になります。')">
+          <button class="btn btn-outline-danger btn-sm">削除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="text-center text-muted">実施枠がありません</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal fade" id="laneEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">実施枠編集</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="laneEditForm" method="post">
+        <div class="modal-body">
+          <div class="mb-2"><label class="form-label">実施枠名</label><input type="text" name="name" id="ledit_name" class="form-control" required></div>
+          <div class="mb-2">
+            <label class="form-label">種別</label>
+            <select name="lane_type" id="ledit_lane_type" class="form-select">
+              <option value="normal">通常実施枠</option>
+              <option value="remark">備考枠</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ─── 会場タブ ─── #}
+{% if active_tab == 'venue' %}
+<div class="card mb-3">
+  <div class="card-header fw-bold">会場追加</div>
+  <div class="card-body">
+    <form method="post" action="/master/venue/add" class="row g-2">
+      <div class="col-md-3"><input type="text" name="name" class="form-control form-control-sm" placeholder="会場名*" required></div>
+      <div class="col-md-2"><input type="number" name="capacity" class="form-control form-control-sm" placeholder="収容人数"></div>
+      <div class="col-md-2"><button class="btn btn-primary btn-sm w-100">追加</button></div>
+    </form>
+  </div>
+</div>
+
+{# 一括削除ボタン群 #}
+<div class="d-flex gap-2 mb-3 no-print" id="bulk-delete-section-venue" style="display:none;">
+  <button class="btn btn-outline-secondary" id="btn-clear-selection-venue">
+    選択解除
+  </button>
+  <button class="btn btn-danger" id="btn-delete-selected-venue">
+    <i class="bi bi-trash"></i> 選択項目を削除
+  </button>
+  <span class="text-muted small align-self-center">
+    <span id="selection-count-venue">0</span>件選択
+  </span>
+</div>
+
+<table class="table table-sm table-bordered master-table">
+  <thead><tr><th style="width:40px" class="no-print"><input type="checkbox" id="checkbox-select-all-venue" class="checkbox-select-all form-check-input" style="cursor:pointer"></th><th style="width:30px" class="no-print"></th><th>会場名</th><th>収容人数</th><th>状態</th><th class="no-print">操作</th></tr></thead>
+  <tbody id="sortable-venue" data-model="venue">
+    {% for v in venues %}
+    <tr class="{{ '' if v.is_active else 'table-secondary text-muted' }}" data-id="{{ v.id }}">
+      <td class="no-print"><input type="checkbox" class="row-checkbox form-check-input" value="{{ v.id }}" data-name="{{ v.name }}" style="cursor:pointer"></td>
+      <td class="drag-handle no-print" style="cursor:grab;text-align:center">&#x2630;</td>
+      <td>{{ v.name }}</td>
+      <td>{{ v.capacity or '' }}</td>
+      <td>{{ '有効' if v.is_active else '無効' }}</td>
+      <td class="no-print" style="white-space:nowrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="openVenueEdit({{ v.id }}, '{{ v.name }}', '{{ v.capacity or '' }}')">編集</button>
+        <form method="post" action="/master/venue/{{ v.id }}/toggle" class="d-inline">
+          <button class="btn btn-outline-{{ 'warning' if v.is_active else 'success' }} btn-sm">{{ '無効化' if v.is_active else '有効化' }}</button>
+        </form>
+        <form method="post" action="/master/venue/{{ v.id }}/delete" class="d-inline"
+              onsubmit="return confirm('{{ v.name }} を削除しますか？')">
+          <button class="btn btn-outline-danger btn-sm">削除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="text-center text-muted">会場がありません</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal fade" id="venueEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">会場編集</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="venueEditForm" method="post">
+        <div class="modal-body">
+          <div class="mb-2"><label class="form-label">会場名</label><input type="text" name="name" id="vedit_name" class="form-control" required></div>
+          <div class="mb-2"><label class="form-label">収容人数</label><input type="number" name="capacity" id="vedit_cap" class="form-control"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ─── 役割タブ ─── #}
+{% if active_tab == 'role' %}
+<div class="card mb-3">
+  <div class="card-header fw-bold">役割追加</div>
+  <div class="card-body">
+    <form method="post" action="/master/role/add" class="row g-2">
+      <div class="col-md-3"><input type="text" name="name" class="form-control form-control-sm" placeholder="役割名*" required></div>
+      <div class="col-md-2"><button class="btn btn-primary btn-sm w-100">追加</button></div>
+    </form>
+  </div>
+</div>
+
+{# 一括削除ボタン群 #}
+<div class="d-flex gap-2 mb-3 no-print" id="bulk-delete-section-role" style="display:none;">
+  <button class="btn btn-outline-secondary" id="btn-clear-selection-role">
+    選択解除
+  </button>
+  <button class="btn btn-danger" id="btn-delete-selected-role">
+    <i class="bi bi-trash"></i> 選択項目を削除
+  </button>
+  <span class="text-muted small align-self-center">
+    <span id="selection-count-role">0</span>件選択
+  </span>
+</div>
+
+<table class="table table-sm table-bordered master-table">
+  <thead><tr><th style="width:40px" class="no-print"><input type="checkbox" id="checkbox-select-all-role" class="checkbox-select-all form-check-input" style="cursor:pointer"></th><th style="width:30px" class="no-print"></th><th>役割名</th><th class="no-print">操作</th></tr></thead>
+  <tbody id="sortable-role" data-model="role">
+    {% for r in roles %}
+    <tr data-id="{{ r.id }}">
+      <td class="no-print"><input type="checkbox" class="row-checkbox form-check-input" value="{{ r.id }}" data-name="{{ r.name }}" style="cursor:pointer"></td>
+      <td class="drag-handle no-print" style="cursor:grab;text-align:center">&#x2630;</td>
+      <td>{{ r.name }}</td>
+      <td class="no-print" style="white-space:nowrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="openRoleEdit({{ r.id }}, '{{ r.name }}')">編集</button>
+        <form method="post" action="/master/role/{{ r.id }}/delete" class="d-inline"
+              onsubmit="return confirm('{{ r.name }} を削除しますか？')">
+          <button class="btn btn-outline-danger btn-sm">削除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="text-center text-muted">役割がありません</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal fade" id="roleEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">役割編集</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="roleEditForm" method="post">
+        <div class="modal-body">
+          <div class="mb-2"><label class="form-label">役割名</label><input type="text" name="name" id="redit_name" class="form-control" required></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ─── テンプレートタブ ─── #}
+{% if active_tab == 'template' %}
+<div class="card mb-3">
+  <div class="card-header fw-bold">テンプレート追加</div>
+  <div class="card-body">
+    <form method="post" action="/master/template/add" class="row g-2">
+      <div class="col-md-4"><input type="text" name="title" class="form-control form-control-sm" placeholder="タイトル*" required></div>
+      <div class="col-md-2"><input type="number" name="duration_min" class="form-control form-control-sm" placeholder="分"></div>
+      <div class="col-md-4"><input type="text" name="note" class="form-control form-control-sm" placeholder="備考"></div>
+      <div class="col-md-2"><button class="btn btn-primary btn-sm w-100">追加</button></div>
+    </form>
+  </div>
+</div>
+
+{# 一括削除ボタン群 #}
+<div class="d-flex gap-2 mb-3 no-print" id="bulk-delete-section-template" style="display:none;">
+  <button class="btn btn-outline-secondary" id="btn-clear-selection-template">
+    選択解除
+  </button>
+  <button class="btn btn-danger" id="btn-delete-selected-template">
+    <i class="bi bi-trash"></i> 選択項目を削除
+  </button>
+  <span class="text-muted small align-self-center">
+    <span id="selection-count-template">0</span>件選択
+  </span>
+</div>
+
+<table class="table table-sm table-bordered master-table">
+  <thead><tr><th style="width:40px" class="no-print"><input type="checkbox" id="checkbox-select-all-template" class="checkbox-select-all form-check-input" style="cursor:pointer"></th><th style="width:30px" class="no-print"></th><th>タイトル</th><th>標準時間</th><th>備考</th><th class="no-print">操作</th></tr></thead>
+  <tbody id="sortable-template" data-model="template">
+    {% for t in templates %}
+    <tr data-id="{{ t.id }}">
+      <td class="no-print"><input type="checkbox" class="row-checkbox form-check-input" value="{{ t.id }}" data-name="{{ t.title }}" style="cursor:pointer"></td>
+      <td class="drag-handle no-print" style="cursor:grab;text-align:center">&#x2630;</td>
+      <td>{{ t.title }}</td>
+      <td>{{ (t.duration_min | string ~ '分') if t.duration_min else '' }}</td>
+      <td>{{ t.note or '' }}</td>
+      <td class="no-print" style="white-space:nowrap">
+        <button class="btn btn-outline-secondary btn-sm" onclick="openTemplateEdit({{ t.id }}, '{{ t.title }}', '{{ t.duration_min or '' }}', '{{ t.note or '' }}')">編集</button>
+        <form method="post" action="/master/template/{{ t.id }}/delete" class="d-inline"
+              onsubmit="return confirm('{{ t.title }} を削除しますか？')">
+          <button class="btn btn-outline-danger btn-sm">削除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="text-center text-muted">テンプレートがありません</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="modal fade" id="templateEditModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">テンプレート編集</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+      <form id="templateEditForm" method="post">
+        <div class="modal-body">
+          <div class="mb-2"><label class="form-label">タイトル</label><input type="text" name="title" id="tedit_title" class="form-control" required></div>
+          <div class="mb-2"><label class="form-label">標準時間（分）</label><input type="number" name="duration_min" id="tedit_dur" class="form-control"></div>
+          <div class="mb-2"><label class="form-label">備考</label><input type="text" name="note" id="tedit_note" class="form-control"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">キャンセル</button>
+          <button type="submit" class="btn btn-primary">保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+function openStaffEdit(id, name, type, dept, grade, note) {
+  document.getElementById('staffEditForm').action = '/master/staff/' + id + '/edit';
+  document.getElementById('edit_name').value = name;
+  document.getElementById('edit_staff_type').value = type;
+  document.getElementById('edit_department').value = dept;
+  document.getElementById('edit_grade').value = grade;
+  document.getElementById('edit_note').value = note;
+  new bootstrap.Modal(document.getElementById('staffEditModal')).show();
+}
+function openLaneEdit(id, name, laneType) {
+  document.getElementById('laneEditForm').action = '/master/lane/' + id + '/edit';
+  document.getElementById('ledit_name').value = name;
+  document.getElementById('ledit_lane_type').value = laneType || 'normal';
+  new bootstrap.Modal(document.getElementById('laneEditModal')).show();
+}
+function openVenueEdit(id, name, cap) {
+  document.getElementById('venueEditForm').action = '/master/venue/' + id + '/edit';
+  document.getElementById('vedit_name').value = name;
+  document.getElementById('vedit_cap').value = cap;
+  new bootstrap.Modal(document.getElementById('venueEditModal')).show();
+}
+function openRoleEdit(id, name) {
+  document.getElementById('roleEditForm').action = '/master/role/' + id + '/edit';
+  document.getElementById('redit_name').value = name;
+  new bootstrap.Modal(document.getElementById('roleEditModal')).show();
+}
+function openTemplateEdit(id, title, dur, note) {
+  document.getElementById('templateEditForm').action = '/master/template/' + id + '/edit';
+  document.getElementById('tedit_title').value = title;
+  document.getElementById('tedit_dur').value = dur;
+  document.getElementById('tedit_note').value = note;
+  new bootstrap.Modal(document.getElementById('templateEditModal')).show();
+}
+
+// ─── ドラッグ＆ドロップ並び替え ─────────────────────────
+document.querySelectorAll('[id^="sortable-"]').forEach(tbody => {
+  new Sortable(tbody, {
+    handle: '.drag-handle',
+    animation: 150,
+    ghostClass: 'table-info',
+    onEnd: function () {
+      const model = tbody.dataset.model;
+      const ids = [...tbody.querySelectorAll('tr[data-id]')].map(tr => tr.dataset.id);
+      fetch('/api/master/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: model, ids: ids })
+      });
+    }
+  });
+});
+
+// ─── 複数選択一括削除機能 ───────────────────────────────────────
+const TABS = ['staff', 'lane', 'venue', 'role', 'template'];
+
+// 各タブの初期化
+TABS.forEach(tab => {
+  initBulkDelete(tab);
+});
+
+function initBulkDelete(tab) {
+  const selectAllCheckbox = document.getElementById(`checkbox-select-all-${tab}`);
+  const rowCheckboxes = document.querySelectorAll(`#sortable-${tab} .row-checkbox`);
+  const clearBtn = document.getElementById(`btn-clear-selection-${tab}`);
+  const deleteBtn = document.getElementById(`btn-delete-selected-${tab}`);
+
+  // 全選択チェックボックス
+  if (selectAllCheckbox) {
+    selectAllCheckbox.addEventListener('change', function() {
+      rowCheckboxes.forEach(cb => cb.checked = this.checked);
+      updateBulkDeleteUI(tab);
+    });
+  }
+
+  // 個別チェックボックス
+  rowCheckboxes.forEach(cb => {
+    cb.addEventListener('change', () => updateBulkDeleteUI(tab));
+  });
+
+  // 選択解除ボタン
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      rowCheckboxes.forEach(cb => cb.checked = false);
+      if (selectAllCheckbox) selectAllCheckbox.checked = false;
+      updateBulkDeleteUI(tab);
+    });
+  }
+
+  // 削除実行ボタン
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', () => handleDeleteSelected(tab));
+  }
+}
+
+function updateBulkDeleteUI(tab) {
+  const selected = document.querySelectorAll(`#sortable-${tab} .row-checkbox:checked`);
+  const section = document.getElementById(`bulk-delete-section-${tab}`);
+  const count = document.getElementById(`selection-count-${tab}`);
+  const selectAllCheckbox = document.getElementById(`checkbox-select-all-${tab}`);
+  const rowCheckboxes = document.querySelectorAll(`#sortable-${tab} .row-checkbox`);
+
+  section.style.display = selected.length > 0 ? 'flex' : 'none';
+  count.textContent = selected.length;
+
+  // 全選択チェックボックスの状態を更新
+  if (selectAllCheckbox) {
+    selectAllCheckbox.checked = selected.length === rowCheckboxes.length && rowCheckboxes.length > 0;
+  }
+}
+
+async function handleDeleteSelected(tab) {
+  const selected = [...document.querySelectorAll(`#sortable-${tab} .row-checkbox:checked`)]
+    .map(cb => ({id: parseInt(cb.value), name: cb.dataset.name}));
+
+  if (selected.length === 0) return;
+
+  const names = selected.map(s => `"${s.name}"`).join(', ');
+  const confirmed = confirm(`以下の${selected.length}件を削除しますか？\n\n${names}\n\n削除後は復旧できません`);
+
+  if (!confirmed) return;
+
+  const model = document.getElementById(`sortable-${tab}`).dataset.model;
+  const ids = selected.map(s => s.id);
+
+  try {
+    const response = await fetch(`/api/master/${model}/delete-multiple`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: ids, model: model })
+    });
+
+    const result = await response.json();
+    if (result.success) {
+      showBulkDeleteResult(result.results, tab);
+      // 削除成功した行をDOMから削除
+      result.results.deleted_ids.forEach(id => {
+        const row = document.querySelector(`#sortable-${tab} tr[data-id="${id}"]`);
+        if (row) row.remove();
+      });
+      // チェックボックスをリセット
+      document.getElementById(`checkbox-select-all-${tab}`).checked = false;
+      updateBulkDeleteUI(tab);
+      alert(`✓ ${result.results.deleted_ids.length}件を削除しました`);
+    } else {
+      alert(`✗ 削除に失敗しました: ${result.error || '不明なエラー'}`);
+    }
+  } catch (error) {
+    alert(`✗ 通信エラー: ${error.message}`);
+  }
+}
+
+function showBulkDeleteResult(results, tab) {
+  if (results.failed.length > 0) {
+    const failedList = results.failed
+      .map(f => `${f.name}（${f.details}）`)
+      .join('\n');
+
+    const msg = `${results.deleted_ids.length}件削除、${results.failed.length}件削除不可\n\n削除不可:\n${failedList}`;
+    alert(msg);
+
+    // テーブル内で削除不可の行を赤くハイライト
+    results.failed.forEach(f => {
+      const row = document.querySelector(`#sortable-${tab} tr[data-id="${f.id}"]`);
+      if (row) {
+        row.classList.add('table-danger');
+        const checkboxCell = row.querySelector('td');
+        if (checkboxCell) {
+          const badge = document.createElement('span');
+          badge.className = 'badge bg-danger';
+          badge.textContent = '削除不可';
+          checkboxCell.textContent = '';
+          checkboxCell.appendChild(badge);
+          const detailsSpan = document.createElement('span');
+          detailsSpan.className = 'ms-2 small text-danger';
+          detailsSpan.textContent = f.details;
+          checkboxCell.appendChild(detailsSpan);
+        }
+      }
+    });
+  }
+}
+</script>
+{% endblock %}

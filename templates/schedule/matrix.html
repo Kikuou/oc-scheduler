@@ -1,0 +1,1812 @@
+{% extends "base.html" %}
+{% block title %}{{ occasion.name }} スケジュール{% endblock %}
+
+{% block content %}
+<style>
+  /* セル選択 */
+  .schedule-matrix td.cell-selectable { cursor: cell; user-select: none; }
+  .schedule-matrix td.cell-selectable:hover { background: #e3f2fd !important; }
+  .schedule-matrix td.cell-selected { background: #bbdefb !important; }
+
+  /* 設定パネル（Bootstrap モーダルが上に重なれるよう 1045 に設定） */
+  #event-panel {
+    position: fixed; top: 0; right: -500px; width: 500px; height: 100vh;
+    background: #fff; box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+    z-index: 1045; transition: right 0.25s ease; overflow-y: auto; padding: 20px;
+  }
+  #event-panel.open { right: 0; }
+  #event-panel .panel-header {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 16px;
+  }
+  #panel-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.3); z-index: 1040;
+  }
+  #panel-overlay.open { display: block; }
+  .asgn-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+  .asgn-row select { flex: 1; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-2 no-print">
+  <div>
+    <a href="/" class="btn btn-outline-secondary btn-sm">&larr; 開催一覧</a>
+    <h4 class="d-inline ms-2 mb-0">{{ occasion.year }}年度 {{ occasion.name }}（{{ occasion.date }}）</h4>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/report/{{ occasion.id }}" class="btn btn-outline-primary btn-sm">帳票出力</a>
+    <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse" data-bs-target="#settings-panel">
+      ⚙ 開催設定
+    </button>
+  </div>
+</div>
+
+{# ─── 開催設定パネル ─── #}
+<div class="collapse no-print" id="settings-panel">
+  <div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:6px;padding:12px 16px;margin-bottom:12px;">
+    <h6 class="mb-2">開催設定</h6>
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small">開始時刻</label>
+        <input type="time" id="set_start" class="form-control form-control-sm" value="{{ occasion.day_start_time }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">終了時刻</label>
+        <input type="time" id="set_end" class="form-control form-control-sm" value="{{ occasion.day_end_time }}">
+      </div>
+      <div class="col">
+        <label class="form-label small">使用実施枠（列）</label>
+        <div class="d-flex flex-wrap gap-2">
+          {% for pl in all_lanes %}
+          <div class="form-check form-check-inline">
+            <input class="form-check-input set-lane-cb" type="checkbox" value="{{ pl.id }}" id="sl_{{ pl.id }}"
+                   {{ 'checked' if pl.id in occasion.program_lane_ids }}>
+            <label class="form-check-label small" for="sl_{{ pl.id }}">{{ pl.name }}</label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm" onclick="saveSettings()">設定を保存</button>
+      </div>
+    </div>
+    <div class="row g-2 mt-2">
+      <div class="col-auto">
+        <label class="form-label small">年度</label>
+        <input type="number" id="set_year" class="form-control form-control-sm" value="{{ occasion.year }}" style="width:90px;">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">開催日</label>
+        <input type="date" id="set_date" class="form-control form-control-sm" value="{{ occasion.date }}">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">名称</label>
+        <input type="text" id="set_name" class="form-control form-control-sm" value="{{ occasion.name }}" style="width:200px;">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small">備考</label>
+        <input type="text" id="set_note" class="form-control form-control-sm" value="{{ occasion.note or '' }}" style="width:200px;">
+      </div>
+      <div class="col-auto d-flex align-items-end">
+        <button class="btn btn-outline-primary btn-sm" onclick="saveOccasionInfo()">基本情報を保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# 期間フィルタ #}
+<div class="mb-2 no-print d-flex justify-content-between align-items-center">
+  <div class="btn-group btn-group-sm">
+    <a href="?period=all" class="btn {{ 'btn-secondary' if period=='all' else 'btn-outline-secondary' }}">全日</a>
+    <a href="?period=am" class="btn {{ 'btn-secondary' if period=='am' else 'btn-outline-secondary' }}">午前</a>
+    <a href="?period=pm" class="btn {{ 'btn-secondary' if period=='pm' else 'btn-outline-secondary' }}">午後</a>
+  </div>
+  <div class="small text-muted">
+    ドラッグで範囲選択 → イベント作成　／　クリック → 編集　／　イベントをドラッグ → 移動　／　<kbd>Alt</kbd>+ドラッグ → コピー
+  </div>
+</div>
+
+{# 列の表示/非表示トグル + ドラッグ順序変更（通常実施枠・備考枠を全て対象） #}
+{% if all_occasion_lanes %}
+<div class="mb-2 no-print d-flex align-items-center gap-2 flex-wrap">
+  <span class="small text-muted fw-bold">列の表示：</span>
+  <div id="lane-sort-container" class="d-flex gap-2 flex-wrap align-items-center">
+    {% for lane in all_occasion_lanes %}
+    <button class="btn btn-sm {{ 'btn-success' if lane.is_visible else 'btn-outline-secondary' }} lane-toggle-btn"
+            id="lane-toggle-{{ lane.id }}"
+            data-lane-id="{{ lane.id }}"
+            onclick="toggleLane({{ lane.id }}, this)"
+            title="{{ '表示中（クリックで非表示）' if lane.is_visible else '非表示（クリックで表示）' }}（ドラッグで並び替え）"
+            style="cursor: grab;">
+      {{ lane.name }}
+      {%- if lane.lane_type == 'remark' %}<span class="badge bg-info text-dark ms-1" style="font-size:0.6rem;">備考</span>{% endif %}
+      {%- if not lane.is_visible %} <span class="badge bg-secondary ms-1" style="font-size:0.6rem;">非表示</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  <span class="small text-muted ms-1" style="font-size:0.7rem;">⇄ ドラッグで並び替え</span>
+</div>
+{% endif %}
+
+{# ─── スケジュールマトリクス（時間×実施枠） ─── #}
+{% if matrix.slots %}
+<div class="table-responsive">
+  <table class="schedule-matrix" id="matrixTable">
+    <thead>
+      <tr>
+        <th class="time-col">時間</th>
+        {% for lane in matrix.lanes %}
+        <th{% if lane.lane_type == 'remark' %} class="note-lane-head"{% endif %}>{{ lane.name }}</th>
+        {% endfor %}
+        {% if matrix.has_legacy_notes %}
+        <th class="note-lane-head">備考</th>
+        {% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for slot in matrix.slots %}
+      {% set slot_type = matrix.slot_types.get(slot, 'five') %}
+      <tr data-slot="{{ slot }}" data-slot-type="{{ slot_type }}">
+        <td class="time-col">
+          {% if slot_type == 'hour' %}<span class="time-label hour">{{ slot }}</span>
+          {% elif slot_type == 'half' %}<span class="time-label half">{{ slot }}</span>{% endif %}
+        </td>
+        {% for lane in matrix.lanes %}
+          {% set cell = matrix.cells[slot][lane.id] %}
+          {% if cell is none %}
+            {% if lane.lane_type == 'remark' %}
+            <td class="remark-empty-cell note-empty-style" data-slot="{{ slot }}" data-lane="{{ lane.id }}"></td>
+            {% else %}
+            <td class="cell-selectable" data-slot="{{ slot }}" data-lane="{{ lane.id }}"></td>
+            {% endif %}
+          {% elif cell.get('skip') %}
+            {# rowspan でカバー #}
+          {% elif cell.get('note') %}
+            {# ── 備考枠レーン：ノートセル ── #}
+            {% set nc = cell.note %}
+            <td class="note-cell" rowspan="{{ cell.rowspan }}"
+                data-note-id="{{ nc.id }}"
+                data-start="{{ nc.start_time }}"
+                data-end="{{ nc.end_time }}"
+                data-lane-id="{{ lane.id }}">
+              <div class="note-block" data-note-id="{{ nc.id }}">
+                <div class="resize-handle-top"></div>
+                <span class="note-set-tag">{{ nc.note_set_name }}</span>
+                <div class="note-content-text">{{ nc.content }}</div>
+                <div class="resize-handle-bottom"></div>
+              </div>
+            </td>
+          {% else %}
+            {# ── 通常実施枠：イベントセル ── #}
+            {% set ev = cell.event %}
+            {% set lane_idx = matrix.lane_ids.index(ev.program_lane_id) if ev.program_lane_id in matrix.lane_ids else 0 %}
+            {% set lane_cls = 'lane-color-' ~ (lane_idx % 5) %}
+
+            {# ツールチップの内容を構築 #}
+            {% set tooltip_lines = [] %}
+            {% if ev.assignments %}
+              {% set _ = tooltip_lines.append("【担当者】") %}
+              {% for a in ev.assignments %}
+                {% set _ = tooltip_lines.append(a.role_name ~ "：" ~ a.staff_name) %}
+              {% endfor %}
+            {% else %}
+              {% set _ = tooltip_lines.append("【担当者】未設定") %}
+            {% endif %}
+            {% if ev.note %}
+              {% set _ = tooltip_lines.append("【備考】" ~ ev.note) %}
+            {% endif %}
+            {% if ev.duration_min %}
+              {% set _ = tooltip_lines.append("【所要時間】" ~ ev.duration_min ~ "分") %}
+            {% endif %}
+            {% set tooltip_text = tooltip_lines|join("\n") %}
+
+            <td class="event-cell {{ lane_cls }}"
+                rowspan="{{ cell.rowspan }}"
+                data-event-id="{{ ev.id }}"
+                data-lane-id="{{ lane.id }}"
+                data-start="{{ ev.start_time }}"
+                data-end="{{ ev.end_time }}"
+                data-bs-toggle="tooltip"
+                data-bs-placement="top"
+                data-bs-html="true"
+                title="{{ tooltip_text|replace('\n', '<br>') }}">
+              <div class="event-block">
+                <div class="resize-handle-top"></div>
+                <div class="event-header">
+                  <div class="event-title-row">
+                    <div class="event-title">{{ ev.title }}</div>
+                    {% if ev.duration_min %}
+                    <div class="event-duration">⏱ {{ ev.duration_min }}分</div>
+                    {% endif %}
+                  </div>
+                  {% if ev.venue_name or ev.start_time %}
+                  <div class="event-meta">
+                    {% if ev.venue_name %}📍 {{ ev.venue_name }}{% endif %}
+                    {% if ev.start_time %}{{ ev.start_time }}-{{ ev.end_time }}{% endif %}
+                  </div>
+                  {% endif %}
+                </div>
+                {% if ev.assignments %}
+                <div class="event-assignments">
+                  {% for a in ev.assignments %}
+                  <div class="event-assignment">{{ a.role_name }}：{{ a.staff_name }}</div>
+                  {% endfor %}
+                </div>
+                {% endif %}
+                {% if ev.note %}<div class="event-note text-muted">{{ ev.note }}</div>{% endif %}
+                <div class="resize-handle-bottom"></div>
+              </div>
+            </td>
+          {% endif %}
+        {% endfor %}
+        {# ─── 固定備考列（レガシー：program_lane_id なしのノート）─── #}
+        {% if matrix.has_legacy_notes %}
+          {% set nc = matrix.note_column.get(slot) %}
+          {% if nc is none %}
+            <td class="note-empty-cell" data-slot="{{ slot }}"></td>
+          {% elif nc.get('skip') %}
+            {# rowspan でカバー済み #}
+          {% else %}
+            <td class="note-cell" rowspan="{{ nc.rowspan }}"
+                data-note-id="{{ nc.note.id }}"
+                data-start="{{ nc.note.start_time }}"
+                data-end="{{ nc.note.end_time }}">
+              <div class="note-block" data-note-id="{{ nc.note.id }}">
+                <div class="resize-handle-top"></div>
+                <span class="note-set-tag">{{ nc.note.note_set_name }}</span>
+                <div class="note-content-text">{{ nc.note.content }}</div>
+                <div class="resize-handle-bottom"></div>
+              </div>
+            </td>
+          {% endif %}
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center text-muted py-5">
+  {% if matrix.lanes %}
+  <p>スロットがありません。開催設定で時間帯を設定してください。</p>
+  {% else %}
+  <p>実施枠が設定されていません。「⚙ 開催設定」から使用実施枠を選択してください。</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ─── 編集サイドパネル ─── #}
+<div id="panel-overlay" onclick="closePanel();closeNotePanel()"></div>
+<div id="event-panel">
+  <div class="panel-header">
+    <h5 id="panel-title" class="mb-0">イベント登録</h5>
+    <button class="btn-close" onclick="closePanel()"></button>
+  </div>
+
+  <input type="hidden" id="p_event_id" value="">
+
+  <div class="mb-2">
+    <label class="form-label fw-bold small">タイトル *</label>
+    <input type="text" id="p_title" class="form-control form-control-sm" required oninput="updateTitleHelperText()">
+    <div id="p_title_helper" class="mt-1">
+      <select id="p_template" class="form-select form-select-sm" onchange="applyTemplate()">
+        <option value="">📋 テンプレートを選択すると自動入力されます</option>
+        {% for t in templates %}
+        <option value="{{ t.id }}" data-title="{{ t.title }}" data-note="{{ t.note or '' }}">
+          {{ t.title }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="mb-2">
+    <label class="form-label fw-bold small">対象実施枠 * <span class="text-muted fw-normal">（複数選択可）</span></label>
+    <div id="p_lane_checkboxes" class="d-flex flex-wrap gap-3 border rounded p-2 bg-light">
+      {% set lane_list = matrix.lanes if matrix.lanes else all_lanes %}
+      {% for lane in lane_list %}
+      {% if lane.lane_type != 'remark' %}
+      <div class="form-check mb-0">
+        <input class="form-check-input lane-cb" type="checkbox" value="{{ lane.id }}" id="p_lane_{{ lane.id }}">
+        <label class="form-check-label small" for="p_lane_{{ lane.id }}">{{ lane.name }}</label>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="mb-2">
+    <label class="form-label fw-bold small">会場</label>
+    <select id="p_venue_id" class="form-select form-select-sm">
+      {% for v in all_venues %}
+      <option value="{{ v.id }}">{{ v.name }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="row g-2 mb-2">
+    <div class="col-4">
+      <label class="form-label fw-bold small">開始 *</label>
+      <select id="p_start_time" class="form-select form-select-sm" onchange="onStartTimeChange()"></select>
+    </div>
+    <div class="col-4">
+      <label class="form-label fw-bold small">終了 *</label>
+      <select id="p_end_time" class="form-select form-select-sm" onchange="onEndTimeChange()"></select>
+    </div>
+    <div class="col-4">
+      <label class="form-label fw-bold small">所要時間</label>
+      <select id="p_duration_min" class="form-select form-select-sm" onchange="onDurationChange()"></select>
+    </div>
+  </div>
+
+  <div class="mb-2">
+    <label class="form-label fw-bold small">備考</label>
+    <input type="text" id="p_note" class="form-control form-control-sm">
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label fw-bold small">担当者割当</label>
+    <div id="p_assignments"></div>
+    <button type="button" class="btn btn-outline-primary btn-sm mt-1" onclick="addAssignment()">+ 担当者追加</button>
+  </div>
+
+  <div class="d-flex gap-2 mb-2">
+    <button class="btn btn-primary btn-sm flex-fill" onclick="saveEvent()">保存</button>
+    <button class="btn btn-secondary btn-sm" onclick="closePanel()">キャンセル</button>
+    <button class="btn btn-danger btn-sm" id="btn-delete" style="display:none" onclick="deleteEvent()">削除</button>
+  </div>
+  <div>
+    <button type="button" class="btn btn-outline-secondary btn-sm w-100"
+            onclick="openSaveAsTemplate()"
+            title="タイトル・所要時間・備考をテンプレートとして保存します">
+      📋 この内容をテンプレートとして保存
+    </button>
+  </div>
+</div>
+
+{# ─── 備考編集サイドパネル ─── #}
+<div id="note-panel">
+  <div class="panel-header">
+    <h5 id="note-panel-title" class="mb-0">備考の追加</h5>
+    <button class="btn-close" onclick="closeNotePanel()"></button>
+  </div>
+  <input type="hidden" id="np_note_id" value="">
+  <input type="hidden" id="np_lane_id" value="">
+  <div class="mb-2" id="np_note_set_row">
+    <label class="form-label fw-bold small">備考セット</label>
+    <div class="d-flex gap-2">
+      <select id="np_note_set_id" class="form-select form-select-sm flex-fill">
+        {% if note_sets %}
+          {% for ns in note_sets %}
+          <option value="{{ ns.id }}">{{ ns.name }}</option>
+          {% endfor %}
+        {% else %}
+          <option value="">（デフォルト）</option>
+        {% endif %}
+      </select>
+      <button type="button" class="btn btn-outline-success btn-sm" onclick="createNoteSetQuick()">＋新規</button>
+    </div>
+  </div>
+  <div class="mb-2">
+    <label class="form-label fw-bold small">内容 *</label>
+    <textarea id="np_content" class="form-control form-control-sm" rows="5" placeholder="備考テキストを入力..."></textarea>
+  </div>
+  <div class="row g-2 mb-3">
+    <div class="col-6">
+      <label class="form-label fw-bold small">開始時刻 *</label>
+      <select id="np_start_time" class="form-select form-select-sm" onchange="onNpStartChange()"></select>
+    </div>
+    <div class="col-6">
+      <label class="form-label fw-bold small">終了時刻 *</label>
+      <select id="np_end_time" class="form-select form-select-sm"></select>
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-success btn-sm flex-fill" onclick="saveNote()">保存</button>
+    <button class="btn btn-secondary btn-sm" onclick="closeNotePanel()">キャンセル</button>
+    <button class="btn btn-danger btn-sm" id="np-btn-delete" style="display:none" onclick="deleteNote()">削除</button>
+  </div>
+</div>
+
+{# ─── 削除確認モーダル（グループイベント用） ─── #}
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">🗑️ イベントの削除</h6>
+        <button type="button" class="btn-close btn-sm" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small mb-0" id="deleteConfirmMsg"></p>
+      </div>
+      <div class="modal-footer py-1 flex-nowrap gap-1">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+        <button type="button" class="btn btn-outline-danger btn-sm" id="deleteThisBtn">この実施枠のみ削除</button>
+        <button type="button" class="btn btn-danger btn-sm" id="deleteAllBtn">全実施枠から削除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ─── テンプレートとして保存 モーダル ─── #}
+<div class="modal fade" id="saveAsTemplateModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title mb-0">📋 テンプレートとして保存</h6>
+        <button type="button" class="btn-close btn-sm" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small mb-2">
+          <strong>タイトル・備考</strong> をテンプレートとして保存します。
+        </p>
+        <p class="small text-muted mb-3">
+          ※ 実施枠・会場・担当者・時間は保存されません（汎用テンプレート用）
+        </p>
+        <div class="mb-2">
+          <label class="form-label small fw-bold">タイトル *</label>
+          <input type="text" id="sat_title" class="form-control form-control-sm">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">備考</label>
+          <input type="text" id="sat_note" class="form-control form-control-sm">
+        </div>
+      </div>
+      <div class="modal-footer py-1">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">キャンセル</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmSaveAsTemplate()">保存する</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ─── データ埋め込み ─── #}
+<script>
+const OCCASION_ID = {{ occasion.id }};
+const STAFF_LIST = [
+  {% for s in staff_list %}
+  {id: {{ s.id }}, name: "{{ s.name }}", type: "{{ s.staff_type }}", dept: "{{ s.department or '' }}", grade: {{ s.grade or 'null' }}},
+  {% endfor %}
+];
+const ROLES = [
+  {% for r in roles %}
+  {id: {{ r.id }}, name: "{{ r.name }}"},
+  {% endfor %}
+];
+const EVENT_MAP = {{ matrix.events | tojson }};
+const OCC_START = "{{ occasion.day_start_time }}";
+const OCC_END   = "{{ occasion.day_end_time }}";
+const TIME_STEP = 5; // 時間ドロップダウンの刻み（分）
+const LANES     = {{ matrix.lanes | tojson }};
+const LANE_IDS  = {{ matrix.lane_ids | tojson }};
+const NOTE_MAP  = {{ matrix.notes | tojson }};
+const NOTE_SETS = {{ note_sets | tojson }};
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+<script>
+// ─── ページロード時に現在の表示中実施枠をLocalStorageへ保存 ────
+document.addEventListener('DOMContentLoaded', function() {
+  const visibleLanes = [...document.querySelectorAll('.lane-toggle-btn.btn-success')]
+    .map(b => parseInt(b.dataset.laneId));
+  localStorage.setItem(`occasion_${OCCASION_ID}_visible_lanes`, JSON.stringify(visibleLanes));
+});
+
+// ─── 列の並び替え（ドラッグ＆ドロップ） ───────────────────────
+const laneSortContainer = document.getElementById('lane-sort-container');
+if (laneSortContainer) {
+  new Sortable(laneSortContainer, {
+    animation: 150,
+    ghostClass: 'opacity-50',
+    onEnd: async function () {
+      const laneIds = [...laneSortContainer.querySelectorAll('[data-lane-id]')]
+        .map(btn => parseInt(btn.dataset.laneId));
+      const res = await fetch(`/api/occasion/${OCCASION_ID}/lanes/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lane_ids: laneIds }),
+      });
+      if ((await res.json()).ok) {
+        location.reload();
+      } else {
+        alert('並び替えの保存に失敗しました');
+      }
+    },
+  });
+}
+
+// ─── 開催設定の保存 ──────────────────────────────────────────
+async function saveSettings() {
+  const laneIds = [];
+  document.querySelectorAll('.set-lane-cb:checked').forEach(cb => laneIds.push(parseInt(cb.value)));
+  if (laneIds.length === 0) { alert('実施枠を1つ以上選択してください'); return; }
+
+  const body = {
+    day_start_time: document.getElementById('set_start').value,
+    day_end_time: document.getElementById('set_end').value,
+    program_lane_ids: laneIds,
+  };
+  const res = await fetch(`/api/occasion/${OCCASION_ID}/settings`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if ((await res.json()).ok) location.reload();
+  else alert('設定の保存に失敗しました');
+}
+
+// ─── 列の表示/非表示トグル ────────────────────────────────────
+async function toggleLane(laneId, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/occasion/${OCCASION_ID}/lane/${laneId}/toggle`, {
+      method: 'POST'
+    });
+    const data = await res.json();
+    if (data.ok) {
+      location.reload();
+    } else {
+      alert('切替に失敗しました: ' + (data.error || ''));
+      btn.disabled = false;
+    }
+  } catch(e) {
+    alert('通信エラーが発生しました');
+    btn.disabled = false;
+  }
+}
+
+async function saveOccasionInfo() {
+  const form = new FormData();
+  form.append('year', document.getElementById('set_year').value);
+  form.append('date', document.getElementById('set_date').value);
+  form.append('name', document.getElementById('set_name').value);
+  form.append('note', document.getElementById('set_note').value);
+  document.querySelectorAll('.set-lane-cb:checked').forEach(cb => form.append('program_lane_ids', cb.value));
+
+  const res = await fetch(`/occasion/${OCCASION_ID}/edit`, { method: 'POST', body: form });
+  if (res.redirected) location.href = res.url;
+  else location.reload();
+}
+
+
+// ─── ドラッグ選択（同一実施枠列のみ） ────────────────────────
+let isDragging = false;
+let selStart = null;
+let selEnd = null;
+let selectedCells = [];
+
+const table = document.getElementById('matrixTable');
+if (table) {
+  table.addEventListener('mousedown', function(e) {
+    const td = e.target.closest('td.cell-selectable');
+    if (!td) return;
+    e.preventDefault();
+    isDragging = true;
+    selStart = { slot: td.dataset.slot, lane: parseInt(td.dataset.lane), el: td };
+    selEnd = selStart;
+    clearSelection();
+    highlightSelection();
+  });
+
+  table.addEventListener('mouseover', function(e) {
+    if (!isDragging) return;
+    const td = e.target.closest('td.cell-selectable');
+    if (!td) return;
+    if (parseInt(td.dataset.lane) !== selStart.lane) return; // 同列のみ
+    selEnd = { slot: td.dataset.slot, lane: parseInt(td.dataset.lane), el: td };
+    clearSelection();
+    highlightSelection();
+  });
+
+  document.addEventListener('mouseup', function(e) {
+    if (!isDragging) return;
+    // イベントドラッグ/リサイズ中はcell-selectionを無効化
+    // （evDragActive等はこの後宣言されるが、コールバック実行時には初期化済み）
+    if (typeof evDragActive !== 'undefined' && (evDragActive || resizeActive || pendingEvDrag)) return;
+    isDragging = false;
+    if (selectedCells.length > 0) openPanelFromSelection();
+  });
+}
+
+function clearSelection() {
+  document.querySelectorAll('.cell-selected').forEach(el => el.classList.remove('cell-selected'));
+  selectedCells = [];
+}
+
+function highlightSelection() {
+  if (!selStart || !selEnd) return;
+  const laneId = selStart.lane;
+  const allSelectable = document.querySelectorAll(`td.cell-selectable[data-lane="${laneId}"]`);
+  const slots = Array.from(allSelectable).map(td => td.dataset.slot);
+
+  const lo = Math.min(slots.indexOf(selStart.slot), slots.indexOf(selEnd.slot));
+  const hi = Math.max(slots.indexOf(selStart.slot), slots.indexOf(selEnd.slot));
+  if (lo < 0 || hi < 0) return;
+
+  selectedCells = [];
+  allSelectable.forEach(td => {
+    const idx = slots.indexOf(td.dataset.slot);
+    if (idx >= lo && idx <= hi) {
+      td.classList.add('cell-selected');
+      selectedCells.push(td);
+    }
+  });
+}
+
+function openPanelFromSelection() {
+  if (selectedCells.length === 0) return;
+  const slots = selectedCells.map(td => td.dataset.slot).sort();
+  const laneId = parseInt(selectedCells[0].dataset.lane);
+  const startTime = slots[0];
+  const lastSlot = slots[slots.length - 1];
+  const [h, m] = lastSlot.split(':').map(Number);
+  const endMin = h * 60 + m + 5;  // 5分スロット対応（旧10→5）
+  const duration = endMin - (parseInt(startTime.split(':')[0]) * 60 + parseInt(startTime.split(':')[1]));
+
+  openPanelForNew(startTime, laneId, duration);
+}
+
+
+// ─── サイドパネル ─────────────────────────────────────────────
+function openPanel() {
+  document.getElementById('event-panel').classList.add('open');
+  document.getElementById('panel-overlay').classList.add('open');
+}
+function closePanel() {
+  document.getElementById('event-panel').classList.remove('open');
+  document.getElementById('panel-overlay').classList.remove('open');
+  clearSelection();
+}
+
+// ─── 時間ドロップダウン ───────────────────────────────────────
+function _toMin(t) {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+function _fromMin(min) {
+  return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
+}
+function _durLabel(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  if (h === 0) return `${m}分`;
+  if (m === 0) return `${h}時間`;
+  return `${h}時間${m}分`;
+}
+
+/** 開始時刻セレクトを構築（OCC_START〜OCC_END-1ステップ、5分刻み） */
+function buildStartSel(selVal) {
+  const sel = document.getElementById('p_start_time');
+  const sMin = _toMin(OCC_START), eMin = _toMin(OCC_END);
+  const vals = [];
+  for (let t = sMin; t < eMin; t += TIME_STEP) vals.push(_fromMin(t));
+  if (selVal && !vals.includes(selVal)) vals.push(selVal); // 範囲外の既存値を保持
+  vals.sort((a, b) => _toMin(a) - _toMin(b));
+  sel.innerHTML = '';
+  vals.forEach(v => sel.add(new Option(v, v, false, v === selVal)));
+}
+
+/** 終了時刻セレクトを構築（startVal+1ステップ〜OCC_END、5分刻み） */
+function buildEndSel(startVal, selVal) {
+  const sel = document.getElementById('p_end_time');
+  const sMin = _toMin(startVal) + TIME_STEP, eMin = _toMin(OCC_END);
+  const vals = [];
+  for (let t = sMin; t <= eMin; t += TIME_STEP) vals.push(_fromMin(t));
+  if (selVal && !vals.includes(selVal)) vals.push(selVal); // 範囲外の既存値を保持
+  vals.sort((a, b) => _toMin(a) - _toMin(b));
+  sel.innerHTML = '';
+  vals.forEach(v => sel.add(new Option(v, v, false, v === selVal)));
+}
+
+/** 所要時間セレクトを構築（TIME_STEP〜最大所要時間、5分刻み） */
+function buildDurSel(selMin) {
+  const sel = document.getElementById('p_duration_min');
+  const maxDur = _toMin(OCC_END) - _toMin(OCC_START);
+  // 5の倍数でない既存値を近似丸め
+  const rounded = selMin ? Math.round(selMin / TIME_STEP) * TIME_STEP : TIME_STEP;
+  sel.innerHTML = '';
+  for (let d = TIME_STEP; d <= maxDur; d += TIME_STEP) {
+    sel.add(new Option(_durLabel(d), d, false, d === rounded));
+  }
+}
+
+/** 3つのセレクトを一括初期化 */
+function initTimeFields(startVal, endVal, durMin) {
+  buildStartSel(startVal);
+  buildEndSel(startVal, endVal);
+  buildDurSel(durMin);
+}
+
+/** 開始時刻変更：終了・所要時間を再計算（現在の所要時間を維持しつつ上限補正） */
+function onStartTimeChange() {
+  const startVal = document.getElementById('p_start_time').value;
+  if (!startVal) return;
+  const startMin = _toMin(startVal);
+  const durMin   = parseInt(document.getElementById('p_duration_min').value) || 30;
+  const occEndMin = _toMin(OCC_END);
+  let newEndMin = startMin + durMin;
+  if (newEndMin > occEndMin) newEndMin = occEndMin;
+  if (newEndMin <= startMin) newEndMin = startMin + TIME_STEP;
+  buildEndSel(startVal, _fromMin(newEndMin));
+  buildDurSel(_toMin(document.getElementById('p_end_time').value) - startMin);
+}
+
+/** 終了時刻変更（パターンB）：終了→所要時間を更新 */
+function onEndTimeChange() {
+  const startMin = _toMin(document.getElementById('p_start_time').value);
+  const endMin   = _toMin(document.getElementById('p_end_time').value);
+  if (endMin > startMin) buildDurSel(endMin - startMin);
+}
+
+/** 所要時間変更（パターンA）：所要時間→終了時刻を更新 */
+function onDurationChange() {
+  const startVal = document.getElementById('p_start_time').value;
+  if (!startVal) return;
+  const startMin  = _toMin(startVal);
+  const durMin    = parseInt(document.getElementById('p_duration_min').value);
+  const newEndVal = _fromMin(startMin + durMin);
+  const endSel    = document.getElementById('p_end_time');
+  if (Array.from(endSel.options).some(o => o.value === newEndVal)) {
+    endSel.value = newEndVal;
+  } else if (startMin + durMin <= _toMin(OCC_END)) {
+    buildEndSel(startVal, newEndVal);
+  }
+}
+
+function openPanelForNew(startTime, laneId, duration) {
+  document.getElementById('panel-title').textContent = 'イベント登録';
+  document.getElementById('p_event_id').value = '';
+  document.getElementById('p_title').value = '';
+  document.getElementById('p_note').value = '';
+  document.getElementById('p_template').selectedIndex = 0;
+  document.getElementById('btn-delete').style.display = 'none';
+  updateTitleHelperText();
+
+  // 実施枠チェックボックスをリセットして指定レーンだけチェック
+  document.querySelectorAll('.lane-cb').forEach(cb => cb.checked = false);
+  if (laneId) {
+    const cb = document.getElementById(`p_lane_${laneId}`);
+    if (cb) cb.checked = true;
+  }
+
+  const _sv = startTime || OCC_START;
+  const _dur = duration || 30;
+  const _startMin2 = _toMin(_sv);
+  const _endMin2 = Math.min(_startMin2 + _dur, _toMin(OCC_END));
+  initTimeFields(_sv, _fromMin(_endMin2), _endMin2 - _startMin2);
+
+  document.getElementById('p_assignments').innerHTML = '';
+  addAssignment();
+  openPanel();
+  setTimeout(() => document.getElementById('p_title').focus(), 300);
+}
+
+function openPanelForEditById(eventId) {
+  const ev = EVENT_MAP.find(e => e.id === eventId);
+  if (!ev) return;
+
+  document.getElementById('panel-title').textContent = 'イベント編集';
+  document.getElementById('p_event_id').value = ev.id;
+  document.getElementById('p_title').value = ev.title;
+  if (ev.venue_id) document.getElementById('p_venue_id').value = ev.venue_id;
+  document.getElementById('p_note').value = ev.note || '';
+  document.getElementById('p_template').selectedIndex = 0;
+  document.getElementById('btn-delete').style.display = 'inline-block';
+  updateTitleHelperText();
+  initTimeFields(ev.start_time, ev.end_time, ev.duration_min);
+
+  // 実施枠チェックボックス: グループ内の全実施枠をチェック
+  document.querySelectorAll('.lane-cb').forEach(cb => cb.checked = false);
+  if (ev.event_group_id) {
+    EVENT_MAP.filter(e => e.event_group_id === ev.event_group_id)
+             .forEach(e => {
+               const cb = document.getElementById(`p_lane_${e.program_lane_id}`);
+               if (cb) cb.checked = true;
+             });
+  } else if (ev.program_lane_id) {
+    const cb = document.getElementById(`p_lane_${ev.program_lane_id}`);
+    if (cb) cb.checked = true;
+  }
+
+  const container = document.getElementById('p_assignments');
+  container.innerHTML = '';
+  if (ev.assignments && ev.assignments.length > 0) {
+    ev.assignments.forEach(a => addAssignment(a.staff_id, a.role_id));
+  } else {
+    addAssignment();
+  }
+  openPanel();
+}
+
+
+// ─── 担当者行 ────────────────────────────────────────────────
+function addAssignment(staffId, roleId) {
+  const container = document.getElementById('p_assignments');
+  const div = document.createElement('div');
+  div.className = 'asgn-row';
+
+  let staffOpts = '<option value="">担当者...</option>';
+  STAFF_LIST.forEach(s => {
+    const label = `${s.name}（${s.type}${s.dept ? '・' + s.dept : ''}${s.grade ? s.grade + '年' : ''}）`;
+    staffOpts += `<option value="${s.id}" ${s.id == staffId ? 'selected' : ''}>${label}</option>`;
+  });
+
+  let roleOpts = '<option value="">役割...</option>';
+  ROLES.forEach(r => {
+    roleOpts += `<option value="${r.id}" ${r.id == roleId ? 'selected' : ''}>${r.name}</option>`;
+  });
+
+  div.innerHTML = `
+    <select class="form-select form-select-sm asgn-staff">${staffOpts}</select>
+    <select class="form-select form-select-sm asgn-role">${roleOpts}</select>
+    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.parentElement.remove()">&times;</button>
+  `;
+  container.appendChild(div);
+}
+
+function getAssignments() {
+  const result = [];
+  document.querySelectorAll('.asgn-row').forEach(row => {
+    const staffId = row.querySelector('.asgn-staff').value;
+    const roleId = row.querySelector('.asgn-role').value;
+    if (staffId && roleId) result.push({ staff_id: parseInt(staffId), role_id: parseInt(roleId) });
+  });
+  return result;
+}
+
+
+// ─── テンプレート適用 ─────────────────────────────────────────
+function applyTemplate() {
+  const sel = document.getElementById('p_template');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt.value) return;
+
+  const newTitle = opt.dataset.title || opt.textContent.trim();
+  const newNote = opt.dataset.note || '';
+  const currentTitle = document.getElementById('p_title').value.trim();
+
+  function doApply() {
+    document.getElementById('p_title').value = newTitle;
+    if (newNote) document.getElementById('p_note').value = newNote;
+    updateTitleHelperText();
+    // 適用後はプレースホルダに戻す
+    sel.selectedIndex = 0;
+  }
+
+  if (currentTitle) {
+    if (confirm(`タイトルに「${currentTitle}」が入力済みです。\nテンプレート「${newTitle}」で上書きしますか？`)) {
+      doApply();
+    } else {
+      sel.selectedIndex = 0;
+    }
+  } else {
+    doApply();
+  }
+}
+
+function updateTitleHelperText() {
+  const title = document.getElementById('p_title').value.trim();
+  const helper = document.getElementById('p_title_helper');
+  // タイトルが入力済みの場合はテンプレートセレクトを折りたたむ（小さく表示）
+  if (title) {
+    helper.style.opacity = '0.6';
+  } else {
+    helper.style.opacity = '1';
+  }
+}
+
+
+// ─── 保存・削除 ──────────────────────────────────────────────
+async function saveEvent() {
+  const eventId = document.getElementById('p_event_id').value;
+  const title = document.getElementById('p_title').value.trim();
+  const laneIds = Array.from(document.querySelectorAll('.lane-cb:checked')).map(cb => parseInt(cb.value));
+  const venueId = document.getElementById('p_venue_id').value;
+  const startTime = document.getElementById('p_start_time').value;
+  const durationMin = document.getElementById('p_duration_min').value;
+
+  if (!title || laneIds.length === 0 || !venueId || !startTime || !durationMin) {
+    alert('タイトル、対象実施枠（1つ以上）、会場、開始時刻、所要時間は必須です');
+    return;
+  }
+
+  // ─── 各実施枠の時間重複チェック（フロント側事前確認） ─────────
+  const endTime = document.getElementById('p_end_time').value;
+  if (endTime) {
+    // 編集中イベントのグループ情報を取得（各実施枠の除外IDを正確に設定するため）
+    const ev = eventId ? EVENT_MAP.find(e => e.id === parseInt(eventId)) : null;
+    const groupEvents = ev && ev.event_group_id
+      ? EVENT_MAP.filter(e => e.event_group_id === ev.event_group_id)
+      : (ev ? [ev] : []);
+
+    for (const lid of laneIds) {
+      const siblingInLane = groupEvents.find(e => e.program_lane_id === lid);
+      const params = new URLSearchParams({
+        occasion_id: OCCASION_ID,
+        start_time: startTime,
+        end_time: endTime,
+        program_lane_id: lid,
+      });
+      if (siblingInLane) params.set('exclude_event_id', siblingInLane.id);
+      const laneRes = await fetch(`/api/conflict/lane?${params}`);
+      const laneData = await laneRes.json();
+      if (laneData.conflicts && laneData.conflicts.length > 0) {
+        const c = laneData.conflicts[0];
+        const cbLabel = document.querySelector(`label[for="p_lane_${lid}"]`);
+        const laneName = cbLabel ? cbLabel.textContent.trim() : `ID=${lid}`;
+        alert(`【${laneName}】この時間帯には「${c.title}」（${c.start}〜${c.end}）がすでに登録されています。\n同じ実施枠内で時間が重複するイベントは登録できません。`);
+        return;
+      }
+    }
+  }
+
+  const body = {
+    occasion_id: OCCASION_ID,
+    title: title,
+    program_lane_ids: laneIds,
+    venue_id: parseInt(venueId),
+    start_time: startTime,
+    duration_min: parseInt(durationMin),
+    note: document.getElementById('p_note').value,
+    assignments: getAssignments(),
+  };
+
+  const url = eventId ? `/api/event/${eventId}/update` : '/api/event/create';
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    location.reload();
+  } else {
+    alert('保存に失敗しました: ' + (data.error || ''));
+  }
+}
+
+async function deleteEvent() {
+  const eventId = document.getElementById('p_event_id').value;
+  if (!eventId) return;
+
+  const ev = EVENT_MAP.find(e => e.id === parseInt(eventId));
+  const groupEvents = ev && ev.event_group_id
+    ? EVENT_MAP.filter(e => e.event_group_id === ev.event_group_id)
+    : [];
+
+  if (groupEvents.length > 1) {
+    // グループイベント → 専用モーダルで選択
+    const laneNames = groupEvents.map(e => e.program_lane_name || '').filter(Boolean).join('・');
+    document.getElementById('deleteConfirmMsg').textContent =
+      `このイベントは「${laneNames}」の${groupEvents.length}つの実施枠に共通登録されています。どのように削除しますか？`;
+    const modal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
+    document.getElementById('deleteThisBtn').onclick = async () => {
+      modal.hide();
+      await execDelete(eventId, 'this');
+    };
+    document.getElementById('deleteAllBtn').onclick = async () => {
+      modal.hide();
+      await execDelete(eventId, 'all');
+    };
+    modal.show();
+  } else {
+    if (!confirm('このイベントを削除しますか？')) return;
+    await execDelete(eventId, 'this');
+  }
+}
+
+async function execDelete(eventId, scope) {
+  const res = await fetch(`/api/event/${eventId}/delete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope }),
+  });
+  if ((await res.json()).ok) location.reload();
+}
+
+
+// ─── テンプレートとして保存 ──────────────────────────────────
+function openSaveAsTemplate() {
+  const title = document.getElementById('p_title').value.trim();
+  if (!title) { alert('タイトルを入力してから保存してください'); return; }
+  document.getElementById('sat_title').value = title;
+  document.getElementById('sat_note').value = document.getElementById('p_note').value || '';
+  new bootstrap.Modal(document.getElementById('saveAsTemplateModal')).show();
+}
+
+async function confirmSaveAsTemplate() {
+  const title = document.getElementById('sat_title').value.trim();
+  if (!title) { alert('タイトルを入力してください'); return; }
+  const note = document.getElementById('sat_note').value.trim();
+
+  const res = await fetch('/api/master/template/quick-add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      title,
+      note: note || null,
+    }),
+  });
+  const data = await res.json();
+
+  bootstrap.Modal.getInstance(document.getElementById('saveAsTemplateModal')).hide();
+
+  if (!data.ok) {
+    alert('保存に失敗しました: ' + (data.error || ''));
+    return;
+  }
+
+  // テンプレート選択肢に即時追加
+  const sel = document.getElementById('p_template');
+  const opt = new Option(data.title, data.id);
+  opt.dataset.title = data.title;
+  opt.dataset.note = data.note || '';
+  sel.add(opt);
+
+  // 成功トースト表示
+  showToast('テンプレートを保存しました：' + data.title);
+}
+
+// ═══════════════════════════════════════════════════════
+// ドラッグ移動・コピー・リサイズ（縦横移動 + Alt コピー対応）
+// ═══════════════════════════════════════════════════════
+
+// ── 状態変数 ────────────────────────────────────────────
+let evDragActive = false;   // ドラッグ確定フラグ
+let resizeActive = false;   // リサイズ中フラグ
+let pendingEvDrag = null;   // mousedown直後の仮状態（クリック/ドラッグ判別用）
+let evDragState  = null;    // ドラッグ確定後の状態
+let resizeState  = null;    // リサイズ状態
+
+// ── ユーティリティ ────────────────────────────────────
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// グリッド行のY座標マップを生成（mousedown時に一度だけ呼ぶ）
+function getRowMap() {
+  const rows = [];
+  document.querySelectorAll('#matrixTable tbody tr[data-slot]').forEach(tr => {
+    const r = tr.getBoundingClientRect();
+    rows.push({ slot: tr.dataset.slot, top: r.top });
+  });
+  return rows;
+}
+
+// Y座標 → 最も近い5分スロット文字列
+function slotFromY(y, rowMap) {
+  let found = rowMap[0];
+  for (const row of rowMap) {
+    if (row.top <= y) found = row;
+    else break;
+  }
+  return found ? found.slot : null;
+}
+
+// ★ 列のX座標マップ（thead th から生成）
+function getLaneMap() {
+  const ths = document.querySelectorAll('#matrixTable thead th');
+  const map = [];
+  let idx = 0;
+  ths.forEach((th, i) => {
+    if (i === 0) return; // time-col をスキップ
+    if (idx < LANES.length) {
+      const r = th.getBoundingClientRect();
+      map.push({ laneId: LANES[idx].id, laneName: LANES[idx].name, left: r.left, right: r.right });
+      idx++;
+    }
+  });
+  return map;
+}
+
+// ★ X座標 → レーン情報（境界外は最近傍を返す）
+function laneFromX(x, laneMap) {
+  if (!laneMap || !laneMap.length) return null;
+  for (const l of laneMap) {
+    if (x >= l.left && x < l.right) return l;
+  }
+  let found = laneMap[0], minDist = Infinity;
+  for (const l of laneMap) {
+    const center = (l.left + l.right) / 2;
+    const dist = Math.abs(x - center);
+    if (dist < minDist) { minDist = dist; found = l; }
+  }
+  return found;
+}
+
+// ドロップ先ハイライト（列対応版）
+function clearDropTargets() {
+  document.querySelectorAll('#matrixTable tr.drop-target').forEach(tr => tr.classList.remove('drop-target'));
+  document.querySelectorAll('#matrixTable td.drop-target-cell').forEach(td => td.classList.remove('drop-target-cell'));
+}
+function highlightDropTarget(startSlot, durMin, targetLaneId) {
+  const sMin = _toMin(startSlot), eMin = sMin + durMin;
+  document.querySelectorAll('#matrixTable tbody tr[data-slot]').forEach(tr => {
+    const t = _toMin(tr.dataset.slot);
+    if (t >= sMin && t < eMin) {
+      tr.classList.add('drop-target');
+      if (targetLaneId != null) {
+        const td = tr.querySelector(`td[data-lane="${targetLaneId}"], td[data-lane-id="${targetLaneId}"]`);
+        if (td) td.classList.add('drop-target-cell');
+      }
+    } else {
+      tr.classList.remove('drop-target');
+    }
+  });
+}
+
+// クライアント側競合チェック
+function hasConflictClient(laneId, startTime, endTime, excludeEventId) {
+  const s = _toMin(startTime), e = _toMin(endTime);
+  return EVENT_MAP.some(ev => {
+    if (ev.id === excludeEventId) return false;
+    if (ev.program_lane_id !== laneId) return false;
+    return _toMin(ev.start_time) < e && _toMin(ev.end_time) > s;
+  });
+}
+
+// ★ イベント時間・列をAPIで更新（newLaneIds=null なら元の列を維持）
+async function updateEventTimeAPI(eventId, newStart, newDurMin, newLaneIds) {
+  const ev = EVENT_MAP.find(ev => ev.id === eventId);
+  if (!ev) return;
+
+  const newEnd = _fromMin(_toMin(newStart) + newDurMin);
+  const laneIds = newLaneIds || (ev.event_group_id
+    ? EVENT_MAP.filter(e => e.event_group_id === ev.event_group_id).map(e => e.program_lane_id)
+    : [ev.program_lane_id]);
+
+  for (const lid of laneIds) {
+    const sameGroup = ev.event_group_id
+      ? EVENT_MAP.find(e => e.event_group_id === ev.event_group_id && e.program_lane_id === lid)
+      : (ev.program_lane_id === lid ? ev : null);
+    const excludeId = sameGroup ? sameGroup.id : null;
+    if (hasConflictClient(lid, newStart, newEnd, excludeId)) {
+      const lName = (LANES.find(l => l.id === lid) || {}).name || 'レーン';
+      showToast('⚠ ' + lName + ' ' + newStart + '〜' + newEnd + ' に別のイベントがあります');
+      return;
+    }
+  }
+
+  const res = await fetch(`/api/event/${eventId}/update`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      occasion_id: OCCASION_ID, title: ev.title,
+      program_lane_ids: laneIds, venue_id: ev.venue_id,
+      start_time: newStart, duration_min: newDurMin,
+      note: ev.note, assignments: ev.assignments,
+    }),
+  });
+  const data = await res.json();
+  if (!data.ok) { showToast('更新に失敗しました: ' + (data.error || '')); return; }
+  sessionStorage.setItem('matrixScrollY', window.scrollY);
+  location.reload();
+}
+
+// ★ コピー処理（別レーンに新規イベントとして作成）
+async function copyEventAPI(eventId, newStart, newDurMin, targetLaneId) {
+  const ev = EVENT_MAP.find(ev => ev.id === eventId);
+  if (!ev) return;
+  const newEnd = _fromMin(_toMin(newStart) + newDurMin);
+  if (hasConflictClient(targetLaneId, newStart, newEnd, null)) {
+    const lName = (LANES.find(l => l.id === targetLaneId) || {}).name || 'レーン';
+    showToast('⚠ ' + lName + ' ' + newStart + '〜' + newEnd + ' にすでにイベントがあります');
+    return;
+  }
+  const res = await fetch('/api/event/create', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      occasion_id: OCCASION_ID, title: ev.title,
+      program_lane_ids: [targetLaneId], venue_id: ev.venue_id,
+      start_time: newStart, duration_min: newDurMin,
+      note: ev.note,
+      assignments: ev.assignments.map(a => ({ staff_id: a.staff_id, role_id: a.role_id })),
+    }),
+  });
+  const data = await res.json();
+  if (!data.ok) { showToast('コピーに失敗しました: ' + (data.error || '')); return; }
+  sessionStorage.setItem('matrixScrollY', window.scrollY);
+  location.reload();
+}
+
+// ════════════════════════════════════════════════════════
+// ② ドラッグ移動・コピー
+//   通常ドラッグ → 縦（時間）＋横（列）移動
+//   Alt+ドラッグ → 別列へコピー
+// ════════════════════════════════════════════════════════
+
+function startEvDrag(eventId, laneId, e) {
+  const ev = EVENT_MAP.find(ev => ev.id === eventId);
+  if (!ev) return;
+  const td = document.querySelector(`.event-cell[data-event-id="${eventId}"]`);
+  if (!td) return;
+
+  const tdRect = td.getBoundingClientRect();
+  const origLane = LANES.find(l => l.id === laneId) || { id: laneId, name: '?' };
+  const isCopy = e.altKey;
+  const ghostW = Math.max(180, tdRect.width);
+
+  // ゴーストを事前作成（最初は非表示）
+  const ghost = document.createElement('div');
+  ghost.className = 'ev-drag-ghost';
+  ghost.innerHTML =
+    '<div class="drag-lane">' + (isCopy ? '📋 ' : '➡ ') + escHtml(origLane.name) + '</div>' +
+    '<div class="drag-time">' + ev.start_time + ' → ' + ev.end_time + '</div>';
+  ghost.style.cssText = 'display:none;width:' + ghostW + 'px;';
+  document.body.appendChild(ghost);
+
+  document.body.style.cursor = 'grabbing';
+
+  pendingEvDrag = {
+    eventId, laneId, ev, td, ghost, tdRect, ghostW,
+    startX: e.clientX, startY: e.clientY,
+    rowMap: getRowMap(),
+    laneMap: getLaneMap(),
+    origStart: ev.start_time,
+    origDur: ev.duration_min,
+    origLaneId: laneId,
+    origLaneName: origLane.name,
+    currentStart: ev.start_time,
+    currentLaneId: laneId,
+    isCopy,
+    offsetY: e.clientY - tdRect.top,
+  };
+}
+
+function onEvDragMove(e) {
+  const d = pendingEvDrag || evDragState;
+  if (!d) return;
+
+  if (!evDragActive) {
+    // 3px超えたらドラッグ確定
+    if (Math.abs(e.clientX - d.startX) < 3 && Math.abs(e.clientY - d.startY) < 3) return;
+    d.ghost.style.display = '';
+    d.td.querySelector('.event-block').classList.add('ev-dragging');
+    document.body.style.userSelect = 'none';
+    evDragState = d; evDragActive = true; pendingEvDrag = null;
+  }
+
+  const d2 = evDragState;
+
+  // Altキーでコピーモード切替（ドラッグ中もリアルタイム反映）
+  d2.isCopy = e.altKey;
+
+  // ゴーストをカーソル右下に追従（画面端でクリップ）
+  const gLeft = Math.min(e.clientX + 16, window.innerWidth - d2.ghostW - 4);
+  d2.ghost.style.top  = (e.clientY + 14) + 'px';
+  d2.ghost.style.left = gLeft + 'px';
+
+  // スロット計算（縦）
+  const topY = e.clientY - d2.offsetY;
+  const targetSlot = slotFromY(topY, d2.rowMap);
+  if (targetSlot) d2.currentStart = targetSlot;
+
+  // レーン計算（横）★
+  const targetLaneInfo = laneFromX(e.clientX, d2.laneMap);
+  const targetLaneId   = targetLaneInfo ? targetLaneInfo.laneId   : d2.currentLaneId;
+  const targetLaneName = targetLaneInfo ? targetLaneInfo.laneName : d2.origLaneName;
+  d2.currentLaneId = targetLaneId;
+
+  // ゴースト内容更新
+  const endMin   = Math.min(_toMin(d2.currentStart) + d2.origDur, _toMin(OCC_END));
+  const modeIcon = d2.isCopy ? '📋' : '➡';
+  const laneLabel = d2.currentLaneId !== d2.origLaneId
+    ? (d2.origLaneName + ' → ' + targetLaneName)
+    : targetLaneName;
+  d2.ghost.querySelector('.drag-lane').textContent = modeIcon + ' ' + laneLabel;
+  d2.ghost.querySelector('.drag-time').textContent = d2.currentStart + ' → ' + _fromMin(endMin);
+
+  highlightDropTarget(d2.currentStart, d2.origDur, d2.currentLaneId);
+}
+
+async function onEvDragEnd() {
+  const wasDragging = evDragActive;
+  const d = evDragState || pendingEvDrag;
+
+  // 共通クリーンアップ
+  if (d && d.ghost) d.ghost.remove();
+  if (d && d.td) {
+    const bl = d.td.querySelector('.event-block');
+    if (bl) bl.classList.remove('ev-dragging');
+  }
+  clearDropTargets();
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+
+  if (!wasDragging) {
+    // クリック扱い → 編集パネルを開く
+    const eid = d ? d.eventId : null;
+    evDragState = null; pendingEvDrag = null; evDragActive = false;
+    if (eid) openPanelForEditById(eid);
+    return;
+  }
+
+  const { origStart, currentStart, origDur, origLaneId, currentLaneId, eventId, isCopy, ev } = d;
+  evDragState = null; pendingEvDrag = null; evDragActive = false;
+
+  const newEndMin = Math.min(_toMin(currentStart) + origDur, _toMin(OCC_END));
+  const newDur = newEndMin - _toMin(currentStart);
+  if (newDur < 5) return;
+
+  if (isCopy) {
+    // ── コピーモード ──
+    await copyEventAPI(eventId, currentStart, newDur, currentLaneId);
+  } else {
+    // ── 移動モード ──
+    if (currentStart === origStart && currentLaneId === origLaneId) return; // 変更なし
+
+    // グループイベントの別列移動はフォームから（複雑なため）
+    if (ev.event_group_id && currentLaneId !== origLaneId) {
+      showToast('グループイベントの実施枠変更はフォームから行ってください');
+      return;
+    }
+
+    const newLaneIds = currentLaneId !== origLaneId ? [currentLaneId] : null;
+    await updateEventTimeAPI(eventId, currentStart, newDur, newLaneIds);
+  }
+}
+
+// ════════════════════════════════════════════════════════
+// ③ リサイズ（上端：開始時刻変更 / 下端：終了時刻変更）
+// ════════════════════════════════════════════════════════
+
+function startResize(eventId, laneId, direction, e) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const ev = EVENT_MAP.find(ev => ev.id === eventId);
+  if (!ev) return;
+  const td = document.querySelector(`.event-cell[data-event-id="${eventId}"]`);
+  if (!td) return;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'resize-tooltip';
+  tooltip.textContent = ev.start_time + ' - ' + ev.end_time;
+  document.body.appendChild(tooltip);
+
+  // マウスキャプチャ用オーバーレイ
+  const overlay = document.createElement('div');
+  overlay.id = 'resize-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;cursor:ns-resize;';
+  document.body.appendChild(overlay);
+
+  resizeState = {
+    eventId, laneId, direction, ev, td, tooltip,
+    rowMap: getRowMap(),
+    currentStart: ev.start_time,
+    currentEnd: ev.end_time,
+    origStart: ev.start_time,
+    origEnd: ev.end_time,
+    origDur: ev.duration_min,
+  };
+  resizeActive = true;
+  document.body.style.userSelect = 'none';
+}
+
+function onResizeMove(e) {
+  const rs = resizeState;
+  if (!rs) return;
+
+  rs.tooltip.style.top  = (e.clientY - 32) + 'px';
+  rs.tooltip.style.left = (e.clientX + 14) + 'px';
+
+  const targetSlot = slotFromY(e.clientY, rs.rowMap);
+  if (!targetSlot) return;
+
+  if (rs.direction === 'bottom') {
+    const newEndMin = _toMin(targetSlot) + 5;
+    if (newEndMin > _toMin(rs.currentStart) + 5 && newEndMin <= _toMin(OCC_END)) {
+      rs.currentEnd = _fromMin(newEndMin);
+      rs.tooltip.textContent = rs.currentStart + ' - ' + rs.currentEnd;
+    }
+  } else {  // top
+    const newStart = targetSlot;
+    if (_toMin(newStart) < _toMin(rs.currentEnd) - 5 && _toMin(newStart) >= _toMin(OCC_START)) {
+      rs.currentStart = newStart;
+      rs.tooltip.textContent = rs.currentStart + ' - ' + rs.currentEnd;
+    }
+  }
+}
+
+async function onResizeEnd() {
+  if (!resizeActive || !resizeState) return;
+
+  const rs = resizeState;
+  rs.tooltip.remove();
+  const ov = document.getElementById('resize-overlay');
+  if (ov) ov.remove();
+  resizeActive = false;
+  document.body.style.userSelect = '';
+
+  const { eventId, currentStart, currentEnd, origStart, origDur } = rs;
+  resizeState = null;
+
+  const newDur = _toMin(currentEnd) - _toMin(currentStart);
+  if (currentStart === origStart && newDur === origDur) return;
+  if (newDur < 5) return;
+
+  await updateEventTimeAPI(eventId, currentStart, newDur);
+}
+
+// ════════════════════════════════════════════════════════
+// テーブルへの mousedown ハンドラ登録
+// ════════════════════════════════════════════════════════
+(function() {
+  const tbl = document.getElementById('matrixTable');
+  if (!tbl) return;
+
+  tbl.addEventListener('mousedown', function(e) {
+    if (e.button !== 0) return;
+
+    // リサイズハンドル（備考 or イベント）
+    if (e.target.classList.contains('resize-handle-top') ||
+        e.target.classList.contains('resize-handle-bottom')) {
+      const dir = e.target.classList.contains('resize-handle-top') ? 'top' : 'bottom';
+      // 備考リサイズ
+      const noteTd = e.target.closest('.note-cell');
+      if (noteTd && noteTd.dataset.noteId) {
+        e.preventDefault(); e.stopPropagation();
+        startNoteResize(parseInt(noteTd.dataset.noteId), dir, e);
+        return;
+      }
+      // イベントリサイズ
+      const td = e.target.closest('.event-cell');
+      if (!td || !td.dataset.eventId) return;
+      e.preventDefault(); e.stopPropagation();
+      startResize(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), dir, e);
+      return;
+    }
+
+    // 備考ブロック（ドラッグ or クリック）
+    const noteBlock = e.target.closest('.note-block');
+    if (noteBlock) {
+      const noteTd = noteBlock.closest('.note-cell');
+      if (!noteTd || !noteTd.dataset.noteId) return;
+      e.preventDefault(); e.stopPropagation();
+      startNoteDrag(parseInt(noteTd.dataset.noteId), e);
+      return;
+    }
+
+    // 備考空白セルクリック → 新規作成（レガシー固定列 or 備考枠レーン）
+    const noteEmptyCell   = e.target.closest('.note-empty-cell');
+    const remarkEmptyCell = e.target.closest('.remark-empty-cell');
+    const anyNoteEmpty    = noteEmptyCell || remarkEmptyCell;
+    if (anyNoteEmpty) {
+      e.preventDefault();
+      const laneId = remarkEmptyCell ? remarkEmptyCell.dataset.lane : null;
+      openNotePanelForNew(anyNoteEmpty.dataset.slot, laneId);
+      return;
+    }
+
+    // イベントブロック（ドラッグ or クリック）
+    const block = e.target.closest('.event-block');
+    if (!block) return;
+    const td = block.closest('.event-cell');
+    if (!td || !td.dataset.eventId) return;
+    e.preventDefault(); e.stopPropagation();
+    startEvDrag(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), e);
+  }, { capture: false });
+})();
+
+// ドキュメントレベルの mousemove / mouseup
+document.addEventListener('mousemove', function(e) {
+  if (noteResizeActive)               { onNoteResizeMove(e); return; }
+  if (noteDragActive || pendingNoteDrag) { onNoteDragMove(e); return; }
+  if (resizeActive)                   { onResizeMove(e); return; }
+  if (evDragActive || pendingEvDrag)  { onEvDragMove(e); }
+});
+
+document.addEventListener('mouseup', function(e) {
+  if (noteResizeActive)               { onNoteResizeEnd(); return; }
+  if (noteDragActive || pendingNoteDrag) { onNoteDragEnd(); return; }
+  if (resizeActive)                   { onResizeEnd(); return; }
+  if (evDragActive || pendingEvDrag)  { onEvDragEnd(); return; }
+});
+
+// ── ページロード時スクロール位置復元 ─────────────────────
+(function() {
+  const y = sessionStorage.getItem('matrixScrollY');
+  if (y) { window.scrollTo(0, parseInt(y)); sessionStorage.removeItem('matrixScrollY'); }
+})();
+
+// ═══════════════════════════════════════════════════════
+// 備考レーン：ドラッグ・リサイズ・パネル
+// ═══════════════════════════════════════════════════════
+
+// ── 状態変数 ────────────────────────────────────────────
+let noteDragActive   = false;
+let noteDragState    = null;
+let pendingNoteDrag  = null;
+let noteResizeActive = false;
+let noteResizeState  = null;
+
+// ── 備考時間セレクト構築 ────────────────────────────────
+function buildNpStartSel(selVal) {
+  const sel = document.getElementById('np_start_time');
+  const sMin = _toMin(OCC_START), eMin = _toMin(OCC_END);
+  sel.innerHTML = '';
+  for (let t = sMin; t < eMin; t += TIME_STEP) {
+    const v = _fromMin(t);
+    sel.add(new Option(v, v, false, v === selVal));
+  }
+}
+function buildNpEndSel(startVal, selVal) {
+  const sel = document.getElementById('np_end_time');
+  const sMin = _toMin(startVal) + TIME_STEP, eMin = _toMin(OCC_END);
+  sel.innerHTML = '';
+  for (let t = sMin; t <= eMin; t += TIME_STEP) {
+    const v = _fromMin(t);
+    sel.add(new Option(v, v, false, v === selVal));
+  }
+}
+function onNpStartChange() {
+  const sv = document.getElementById('np_start_time').value;
+  const ev = document.getElementById('np_end_time').value;
+  const fallback = _fromMin(Math.min(_toMin(sv) + 30, _toMin(OCC_END)));
+  buildNpEndSel(sv, (_toMin(ev) > _toMin(sv)) ? ev : fallback);
+}
+
+// ── 備考パネル ──────────────────────────────────────────
+function _npSetLane(laneId) {
+  document.getElementById('np_lane_id').value = laneId || '';
+  // 備考枠レーンの場合は「備考セット」セレクタを非表示
+  const nsRow = document.getElementById('np_note_set_row');
+  if (nsRow) nsRow.style.display = laneId ? 'none' : '';
+}
+
+function openNotePanelForNew(slot, laneId) {
+  document.getElementById('note-panel-title').textContent = '備考の追加';
+  document.getElementById('np_note_id').value = '';
+  document.getElementById('np_content').value = '';
+  document.getElementById('np-btn-delete').style.display = 'none';
+  _npSetLane(laneId || null);
+  buildNpStartSel(slot || OCC_START);
+  const sv = document.getElementById('np_start_time').value;
+  buildNpEndSel(sv, _fromMin(Math.min(_toMin(sv) + 30, _toMin(OCC_END))));
+  const nsSel = document.getElementById('np_note_set_id');
+  if (nsSel && nsSel.options.length > 0) nsSel.selectedIndex = 0;
+  // イベントパネルを閉じてから備考パネルを開く
+  document.getElementById('event-panel').classList.remove('open');
+  document.getElementById('note-panel').classList.add('open');
+  document.getElementById('panel-overlay').classList.add('open');
+  setTimeout(() => document.getElementById('np_content').focus(), 300);
+}
+
+function openNotePanelForEdit(noteId) {
+  const n = NOTE_MAP.find(n => n.id === noteId);
+  if (!n) return;
+  document.getElementById('note-panel-title').textContent = '備考の編集';
+  document.getElementById('np_note_id').value = n.id;
+  document.getElementById('np_content').value = n.content;
+  document.getElementById('np-btn-delete').style.display = 'inline-block';
+  _npSetLane(n.program_lane_id || null);
+  buildNpStartSel(n.start_time);
+  buildNpEndSel(n.start_time, n.end_time);
+  const nsSel = document.getElementById('np_note_set_id');
+  if (nsSel && n.note_set_id) nsSel.value = n.note_set_id;
+  document.getElementById('event-panel').classList.remove('open');
+  document.getElementById('note-panel').classList.add('open');
+  document.getElementById('panel-overlay').classList.add('open');
+}
+
+function closeNotePanel() {
+  document.getElementById('note-panel').classList.remove('open');
+  document.getElementById('panel-overlay').classList.remove('open');
+}
+
+async function saveNote() {
+  const noteId    = document.getElementById('np_note_id').value;
+  const content   = document.getElementById('np_content').value.trim();
+  const startTime = document.getElementById('np_start_time').value;
+  const endTime   = document.getElementById('np_end_time').value;
+  const nsSelEl   = document.getElementById('np_note_set_id');
+  const noteSetId = nsSelEl && nsSelEl.value ? nsSelEl.value : null;
+
+  if (!content)    { alert('内容を入力してください'); return; }
+  if (!startTime || !endTime) { alert('開始・終了時刻を設定してください'); return; }
+  if (_toMin(endTime) <= _toMin(startTime)) { alert('終了時刻は開始時刻より後にしてください'); return; }
+
+  const laneId = document.getElementById('np_lane_id').value;
+  const url    = noteId ? `/api/note/${noteId}/update` : '/api/note/create';
+  const body   = noteId
+    ? { start_time: startTime, end_time: endTime, content,
+        ...(laneId ? {} : { note_set_id: noteSetId }) }
+    : { occasion_id: OCCASION_ID, start_time: startTime, end_time: endTime, content,
+        ...(laneId ? { program_lane_id: parseInt(laneId) } : { note_set_id: noteSetId }) };
+
+  const res  = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (data.ok) { sessionStorage.setItem('matrixScrollY', window.scrollY); location.reload(); }
+  else alert('保存に失敗しました: ' + (data.error || ''));
+}
+
+async function deleteNote() {
+  const noteId = document.getElementById('np_note_id').value;
+  if (!noteId || !confirm('この備考を削除しますか？')) return;
+  const res  = await fetch(`/api/note/${noteId}/delete`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
+  const data = await res.json();
+  if (data.ok) { sessionStorage.setItem('matrixScrollY', window.scrollY); location.reload(); }
+  else alert('削除に失敗しました');
+}
+
+async function createNoteSetQuick() {
+  const name = prompt('備考セット名を入力してください（例：学生用、教員用）');
+  if (!name || !name.trim()) return;
+  const res  = await fetch('/api/note-set/create', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ occasion_id: OCCASION_ID, name: name.trim() }),
+  });
+  const data = await res.json();
+  if (!data.ok) { alert('作成に失敗しました: ' + (data.error || '')); return; }
+  const sel = document.getElementById('np_note_set_id');
+  const opt = new Option(data.name, data.id);
+  sel.add(opt);
+  sel.value = data.id;
+  showToast('備考セットを追加しました：' + data.name);
+}
+
+// ── 備考ドラッグ ────────────────────────────────────────
+function startNoteDrag(noteId, e) {
+  const n = NOTE_MAP.find(n => n.id === noteId);
+  if (!n) return;
+  const td = document.querySelector(`.note-cell[data-note-id="${noteId}"]`);
+  if (!td) return;
+  const tdRect = td.getBoundingClientRect();
+  pendingNoteDrag = {
+    noteId, n, td, tdRect,
+    startX: e.clientX, startY: e.clientY,
+    rowMap: getRowMap(),
+    origStart: n.start_time,
+    origEnd:   n.end_time,
+    origDur:   _toMin(n.end_time) - _toMin(n.start_time),
+    currentStart: n.start_time,
+    offsetY: e.clientY - tdRect.top,
+  };
+  document.body.style.cursor = 'grabbing';
+}
+
+function onNoteDragMove(e) {
+  const d = pendingNoteDrag || noteDragState;
+  if (!d) return;
+  if (!noteDragActive) {
+    if (Math.abs(e.clientX - d.startX) < 3 && Math.abs(e.clientY - d.startY) < 3) return;
+    const bl = d.td.querySelector('.note-block');
+    if (bl) bl.classList.add('nv-dragging');
+    document.body.style.userSelect = 'none';
+    noteDragState = d; noteDragActive = true; pendingNoteDrag = null;
+  }
+  const topY = e.clientY - noteDragState.offsetY;
+  const targetSlot = slotFromY(topY, noteDragState.rowMap);
+  if (targetSlot) noteDragState.currentStart = targetSlot;
+  highlightDropTarget(noteDragState.currentStart, noteDragState.origDur, null);
+}
+
+async function onNoteDragEnd() {
+  const wasDragging = noteDragActive;
+  const d = noteDragState || pendingNoteDrag;
+  if (d && d.td) {
+    const bl = d.td.querySelector('.note-block');
+    if (bl) bl.classList.remove('nv-dragging');
+  }
+  clearDropTargets();
+  document.body.style.cursor = '';
+  document.body.style.userSelect = '';
+  if (!wasDragging) {
+    const nid = d ? d.noteId : null;
+    noteDragState = null; pendingNoteDrag = null; noteDragActive = false;
+    if (nid) openNotePanelForEdit(nid);
+    return;
+  }
+  const { noteId, currentStart, origStart, origDur } = d;
+  noteDragState = null; pendingNoteDrag = null; noteDragActive = false;
+  if (currentStart === origStart) return;
+  const newEndMin = Math.min(_toMin(currentStart) + origDur, _toMin(OCC_END));
+  const newEnd = _fromMin(newEndMin);
+  if (newEndMin - _toMin(currentStart) < 5) return;
+  await updateNoteTimeAPI(noteId, currentStart, newEnd);
+}
+
+async function updateNoteTimeAPI(noteId, newStart, newEnd) {
+  const res  = await fetch(`/api/note/${noteId}/update`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ start_time: newStart, end_time: newEnd }),
+  });
+  const data = await res.json();
+  if (data.ok) { sessionStorage.setItem('matrixScrollY', window.scrollY); location.reload(); }
+  else showToast('備考の更新に失敗しました: ' + (data.error || ''));
+}
+
+// ── 備考リサイズ ────────────────────────────────────────
+function startNoteResize(noteId, direction, e) {
+  const n = NOTE_MAP.find(n => n.id === noteId);
+  if (!n) return;
+  const td = document.querySelector(`.note-cell[data-note-id="${noteId}"]`);
+  if (!td) return;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'resize-tooltip';
+  tooltip.textContent = n.start_time + ' - ' + n.end_time;
+  document.body.appendChild(tooltip);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'note-resize-overlay';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;z-index:9998;cursor:ns-resize;';
+  document.body.appendChild(overlay);
+
+  noteResizeState = {
+    noteId, n, td, tooltip, direction,
+    rowMap: getRowMap(),
+    currentStart: n.start_time,
+    currentEnd:   n.end_time,
+    origStart:    n.start_time,
+    origEnd:      n.end_time,
+  };
+  noteResizeActive = true;
+  document.body.style.userSelect = 'none';
+}
+
+function onNoteResizeMove(e) {
+  const rs = noteResizeState;
+  if (!rs) return;
+  rs.tooltip.style.top  = (e.clientY - 32) + 'px';
+  rs.tooltip.style.left = (e.clientX + 14) + 'px';
+  const targetSlot = slotFromY(e.clientY, rs.rowMap);
+  if (!targetSlot) return;
+  if (rs.direction === 'bottom') {
+    const newEndMin = _toMin(targetSlot) + 5;
+    if (newEndMin > _toMin(rs.currentStart) + 5 && newEndMin <= _toMin(OCC_END)) {
+      rs.currentEnd = _fromMin(newEndMin);
+      rs.tooltip.textContent = rs.currentStart + ' - ' + rs.currentEnd;
+    }
+  } else {
+    const newStart = targetSlot;
+    if (_toMin(newStart) < _toMin(rs.currentEnd) - 5 && _toMin(newStart) >= _toMin(OCC_START)) {
+      rs.currentStart = newStart;
+      rs.tooltip.textContent = rs.currentStart + ' - ' + rs.currentEnd;
+    }
+  }
+}
+
+async function onNoteResizeEnd() {
+  if (!noteResizeActive || !noteResizeState) return;
+  const rs = noteResizeState;
+  rs.tooltip.remove();
+  const ov = document.getElementById('note-resize-overlay');
+  if (ov) ov.remove();
+  noteResizeActive = false;
+  document.body.style.userSelect = '';
+  const { noteId, currentStart, currentEnd, origStart, origEnd } = rs;
+  noteResizeState = null;
+  if (currentStart === origStart && currentEnd === origEnd) return;
+  const newDur = _toMin(currentEnd) - _toMin(currentStart);
+  if (newDur < 5) return;
+  await updateNoteTimeAPI(noteId, currentStart, currentEnd);
+}
+
+function showToast(msg) {
+  let toast = document.getElementById('panel-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'panel-toast';
+    toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
+      'background:#198754;color:#fff;padding:8px 20px;border-radius:6px;font-size:0.85rem;' +
+      'z-index:2000;opacity:0;transition:opacity 0.3s;pointer-events:none;white-space:nowrap;';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  setTimeout(() => { toast.style.opacity = '0'; }, 2500);
+}
+
+// ─── Bootstrap Tooltip 初期化 ───
+document.addEventListener('DOMContentLoaded', function() {
+  // すべてのツールチップ対象要素を初期化
+  const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tooltipTriggerList.map(function (tooltipTriggerEl) {
+    return new bootstrap.Tooltip(tooltipTriggerEl, {
+      delay: { show: 300, hide: 100 }
+    });
+  });
+});
+</script>
+{% endblock %}

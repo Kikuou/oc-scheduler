@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}CSV取込プレビュー{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center gap-2 mb-3">
+  <h2 class="mb-0">CSV取込プレビュー</h2>
+  <span class="text-muted">— 内容を確認してから取り込んでください</span>
+</div>
+
+{# ── サマリーカード ── #}
+<div class="row g-3 mb-4">
+  <div class="col-auto">
+    <div class="card border-success text-success text-center px-4 py-2">
+      <div class="fs-2 fw-bold">{{ ok_count }}</div>
+      <div class="small">取込可能</div>
+    </div>
+  </div>
+  <div class="col-auto">
+    <div class="card border-warning text-warning text-center px-4 py-2">
+      <div class="fs-2 fw-bold">{{ existing_count }}</div>
+      <div class="small">同名が既存</div>
+    </div>
+  </div>
+  <div class="col-auto">
+    <div class="card border-danger text-danger text-center px-4 py-2">
+      <div class="fs-2 fw-bold">{{ error_count }}</div>
+      <div class="small">エラー（スキップ）</div>
+    </div>
+  </div>
+  <div class="col-auto">
+    <div class="card border-secondary text-muted text-center px-4 py-2">
+      <div class="fs-2 fw-bold">{{ rows | length }}</div>
+      <div class="small">合計行数</div>
+    </div>
+  </div>
+</div>
+
+{# ── 取込オプション ── #}
+<form method="post" action="/master/staff/csv-import">
+  <input type="hidden" name="token" value="{{ token }}">
+
+  {% if existing_count > 0 %}
+  <div class="alert alert-warning d-flex align-items-center gap-2 mb-3">
+    <span>⚠️ 同名の担当者がすでに{{ existing_count }}件存在します。</span>
+    <div class="form-check mb-0 ms-2">
+      <input class="form-check-input" type="checkbox" name="include_existing" value="1" id="chk_existing">
+      <label class="form-check-label" for="chk_existing">
+        既存と同名の行も追加で取り込む（重複登録になります）
+      </label>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if error_count > 0 %}
+  <div class="alert alert-danger mb-3">
+    🚫 エラー行は取込スキップされます。修正が必要な場合はキャンセルしてCSVを修正してください。
+  </div>
+  {% endif %}
+
+  {# ── 行プレビューテーブル ── #}
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-bordered align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th style="width:50px">行</th>
+          <th style="width:80px">状態</th>
+          <th>氏名</th>
+          <th>区分</th>
+          <th>所属詳細</th>
+          <th>備考</th>
+          <th>エラー・注意</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% if r.status == 'ok' %}
+          {% set row_class = 'table-success' %}
+          {% set badge = '<span class="badge bg-success">取込OK</span>' %}
+        {% elif r.status == 'existing' %}
+          {% set row_class = 'table-warning' %}
+          {% set badge = '<span class="badge bg-warning text-dark">同名既存</span>' %}
+        {% else %}
+          {% set row_class = 'table-danger' %}
+          {% set badge = '<span class="badge bg-danger">エラー</span>' %}
+        {% endif %}
+        <tr class="{{ row_class }}">
+          <td class="text-center text-muted">{{ r.row_num }}</td>
+          <td class="text-center">{{ badge | safe }}</td>
+          <td>{{ r.name or '<span class="text-danger">（空）</span>' | safe }}</td>
+          <td>{{ r.staff_type or '—' }}</td>
+          <td>{{ r.affiliation or '—' }}</td>
+          <td>{{ r.note or '' }}</td>
+          <td>
+            {% if r.errors %}
+              {% for e in r.errors %}
+                <div class="text-danger small">• {{ e }}</div>
+              {% endfor %}
+            {% elif r.is_existing %}
+              <span class="text-warning small">同名がすでに登録されています</span>
+            {% else %}
+              <span class="text-success small">問題なし</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# ── アクションボタン ── #}
+  <div class="d-flex gap-3 align-items-center">
+    {% if ok_count > 0 or existing_count > 0 %}
+    <button type="submit" name="mode" value="ok_only" class="btn btn-primary">
+      ✅ 問題のない行のみ取り込む
+      （{{ ok_count }}件{% if existing_count > 0 %} ＋ 同名行は上のチェック次第{% endif %}）
+    </button>
+    {% else %}
+    <button type="submit" name="mode" value="ok_only" class="btn btn-primary" disabled>
+      取込可能な行がありません
+    </button>
+    {% endif %}
+    <button type="submit" name="mode" value="cancel"
+            class="btn btn-outline-secondary"
+            onclick="return confirm('取込をキャンセルしてマスタ管理に戻ります。よろしいですか？')">
+      キャンセル
+    </button>
+  </div>
+</form>
+{% endblock %}

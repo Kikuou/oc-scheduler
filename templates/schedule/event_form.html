@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}{% if event %}イベント編集{% else %}イベント登録{% endif %}{% endblock %}
+
+{% block content %}
+<div class="mb-3 no-print">
+  <a href="/occasion/{{ occasion.id }}" class="btn btn-outline-secondary btn-sm">← スケジュール一覧</a>
+</div>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header fw-bold">
+        {% if event %}イベント編集：{{ event.title }}{% else %}イベント登録{% endif %}
+        <small class="text-muted ms-2">{{ occasion.year }}年度 {{ occasion.name }}</small>
+      </div>
+      <div class="card-body">
+        {% if event %}
+        <form method="post" action="/event/{{ event.id }}/edit">
+        {% else %}
+        <form method="post" action="/occasion/{{ occasion.id }}/event/new">
+        {% endif %}
+
+          <div class="row g-2 mb-3">
+            <div class="col-md-8">
+              <label class="form-label fw-bold">タイトル <span class="text-danger">*</span></label>
+              <input type="text" name="title" class="form-control"
+                     value="{{ event.title if event else '' }}" required
+                     list="template_list" id="title_input">
+              <datalist id="template_list">
+                {% for t in templates %}
+                <option value="{{ t.title }}" data-duration="{{ t.duration_min or '' }}"></option>
+                {% endfor %}
+              </datalist>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-bold">会場 <span class="text-danger">*</span></label>
+              <select name="venue_id" class="form-select" id="venue_select" required>
+                <option value="">選択...</option>
+                {% for v in venues %}
+                <option value="{{ v.id }}" {{ 'selected' if event and event.venue_id == v.id }}>
+                  {{ v.name }}
+                </option>
+                {% endfor %}
+              </select>
+              <div id="venue_conflict_msg" class="text-warning small mt-1"></div>
+            </div>
+          </div>
+
+          <div class="row g-2 mb-3">
+            <div class="col-md-3">
+              <label class="form-label fw-bold">開始時刻 <span class="text-danger">*</span></label>
+              <input type="time" name="start_time" class="form-control" id="start_time"
+                     value="{{ event.start_time if event else '' }}" required>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-bold">所要時間（分） <span class="text-danger">*</span></label>
+              <select name="duration_min" class="form-select" id="duration_select" required>
+                <option value="">選択...</option>
+                {% for d in [10,20,30,40,50,60,70,80,90,120] %}
+                <option value="{{ d }}" {{ 'selected' if event and event.duration_min == d }}>{{ d }}分</option>
+                {% endfor %}
+                <option value="custom">カスタム</option>
+              </select>
+              <input type="number" name="" id="duration_custom" class="form-control mt-1 d-none"
+                     placeholder="分を入力" min="1">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label fw-bold">終了時刻（自動計算）</label>
+              <input type="text" id="end_time_display" class="form-control" readonly
+                     value="{{ event.end_time if event else '' }}">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-bold">備考</label>
+            <textarea name="note" class="form-control" rows="2">{{ event.note if event else '' }}</textarea>
+          </div>
+
+          {# 担当者割当セクション #}
+          <div class="mb-3">
+            <label class="form-label fw-bold">担当者割当</label>
+            <table class="table table-sm" id="assignment_table">
+              <thead><tr><th>担当者</th><th>役割</th><th></th></tr></thead>
+              <tbody id="assignment_rows">
+                {% for a in assignments %}
+                <tr class="assignment-row">
+                  <td>
+                    <select name="staff_id[]" class="form-select form-select-sm staff-select" required>
+                      <option value="">選択...</option>
+                      {% for s in staff_list %}
+                      <option value="{{ s.id }}"
+                              data-type="{{ s.staff_type }}"
+                              {{ 'selected' if s.id == a.staff_id }}>
+                        {{ s.name }}（{{ s.staff_type }}{% if s.department %}・{{ s.department }}{% endif %}{% if s.grade %}{{ s.grade }}年{% endif %}）
+                      </option>
+                      {% endfor %}
+                    </select>
+                    <div class="conflict-warning text-warning small mt-1"></div>
+                  </td>
+                  <td>
+                    <select name="role_id[]" class="form-select form-select-sm" required>
+                      <option value="">選択...</option>
+                      {% for r in roles %}
+                      <option value="{{ r.id }}" {{ 'selected' if r.id == a.role_id }}>{{ r.name }}</option>
+                      {% endfor %}
+                    </select>
+                  </td>
+                  <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="removeRow(this)">削除</button></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="addAssignmentRow()">
+              + 担当者を追加
+            </button>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">保存</button>
+            <a href="/occasion/{{ occasion.id }}" class="btn btn-secondary">キャンセル</a>
+            {% if event %}
+            <form method="post" action="/event/{{ event.id }}/delete" class="ms-auto"
+                  onsubmit="return confirm('このイベントと担当割当をすべて削除しますか？')">
+              <button class="btn btn-danger">削除</button>
+            </form>
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  {# テンプレート情報サイドバー #}
+  <div class="col-lg-4 no-print">
+    <div class="card">
+      <div class="card-header">内容テンプレート</div>
+      <div class="card-body p-2">
+        <div class="list-group list-group-flush">
+          {% for t in templates %}
+          <button type="button" class="list-group-item list-group-item-action py-1 small"
+                  onclick="applyTemplate('{{ t.title }}', {{ t.duration_min or 'null' }})">
+            {{ t.title }}
+            {% if t.duration_min %}<span class="text-muted ms-1">{{ t.duration_min }}分</span>{% endif %}
+          </button>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# 隠しデータ（JSで使用） #}
+<script>
+const OCCASION_ID = {{ occasion.id }};
+const EVENT_ID = {{ event.id if event else 'null' }};
+const STAFF_LIST = {{ staff_list | map(attribute='id') | list | tojson }};
+const ROLES = [
+  {% for r in roles %}{"id": {{ r.id }}, "name": "{{ r.name }}"},{% endfor %}
+];
+const STAFF_OPTIONS = `
+  <option value="">選択...</option>
+  {% for s in staff_list %}
+  <option value="{{ s.id }}" data-type="{{ s.staff_type }}">{{ s.name }}（{{ s.staff_type }}{% if s.department %}・{{ s.department }}{% endif %}{% if s.grade %}{{ s.grade }}年{% endif %}）</option>
+  {% endfor %}
+`;
+const ROLE_OPTIONS = `
+  <option value="">選択...</option>
+  {% for r in roles %}
+  <option value="{{ r.id }}">{{ r.name }}</option>
+  {% endfor %}
+`;
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/event_form.js') }}"></script>
+{% endblock %}

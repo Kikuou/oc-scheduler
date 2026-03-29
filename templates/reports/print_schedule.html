@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>スケジュール表 — {{ occasion.name }}</title>
+  <style>
+    /* ── リセット ── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── 印刷設定 ── */
+    @page { size: A4; margin: 10mm 10mm 8mm 10mm; }
+
+    body {
+      font-family: "Hiragino Kaku Gothic Pro", "Meiryo", "MS Gothic", sans-serif;
+      font-size: 8pt;
+      background: #fff;
+      color: #000;
+    }
+
+    /* ── 画面表示用コントロール ── */
+    .no-print {
+      position: fixed; top: 4mm; right: 4mm; z-index: 9999;
+      display: flex; gap: 4px;
+    }
+    .no-print button {
+      padding: 4px 10px; cursor: pointer; font-size: 8pt;
+      border: 1px solid #999; background: #f8f8f8; border-radius: 3px;
+    }
+    .no-print button:hover { background: #e0e0e0; }
+    @media print { .no-print { display: none !important; } }
+
+    /* ── ページ構造 ── */
+    .print-page {
+      width: 100%;
+      page-break-after: always;
+      padding-bottom: 2mm;
+    }
+    .print-page:last-child { page-break-after: avoid; }
+
+    /* ── ヘッダ ── */
+    .page-header {
+      font-size: 9.5pt; font-weight: bold;
+      border-bottom: 1.5pt solid #000;
+      padding-bottom: 1.2mm; margin-bottom: 2mm;
+      display: flex; justify-content: space-between; align-items: baseline;
+    }
+    .page-header-meta {
+      font-size: 7pt; font-weight: normal; color: #444;
+    }
+
+    /* ── テーブル本体 ── */
+    .schedule-table {
+      width: 100%; border-collapse: collapse; table-layout: fixed;
+      border: 1.2pt solid #000;
+    }
+
+    /* 列幅（CSS変数で管理） */
+    .col-time { width: 12mm; }
+
+    /* ── ヘッダ行 ── */
+    .schedule-table thead th {
+      background: #1a1a1a; color: #fff;
+      text-align: center; font-size: 7.5pt;
+      padding: 1.5mm 1mm;
+      border: 0.5pt solid #333;
+      overflow: hidden;
+    }
+
+    /* ── 時間セル ── */
+    .time-cell {
+      text-align: right; padding: 0 1mm 0 0;
+      background: #f2f2f2; font-size: 6.5pt; font-weight: bold;
+      vertical-align: top; white-space: nowrap;
+      border-right: 1pt solid #555;
+    }
+    /* 5分・15分行は時間ラベルを非表示 */
+    tr.slot-quarter .time-cell,
+    tr.slot-five    .time-cell { font-size: 0; }
+
+    /* ── イベントセル ── */
+    .event-cell {
+      background: #fff; padding: 0.8mm 1mm;
+      vertical-align: top; overflow: hidden;
+      border: 0.3pt solid #aaa;
+    }
+    .event-title {
+      font-weight: bold; font-size: 7.5pt; line-height: 1.25;
+    }
+    .event-meta {
+      font-size: 6pt; color: #222; line-height: 1.25; margin-top: 0.3mm;
+    }
+    .event-note-text {
+      font-size: 5.5pt; color: #555; font-style: italic;
+      border-top: 0.3pt solid #ddd; margin-top: 0.5mm; padding-top: 0.3mm;
+    }
+    .event-time {
+      font-size: 5.5pt; color: #888; margin-top: 0.8mm;
+    }
+
+    /* 空きセル */
+    .empty-cell { border: 0.3pt solid #ddd; background: #fff; }
+
+    /* ── スロットタイプ別ボーダー ── */
+    tr.slot-hour   > td { border-top: 1.5pt solid #111 !important; }
+    tr.slot-half   > td { border-top: 0.8pt solid #666 !important; }
+    tr.slot-quarter> td { border-top: 0.15pt solid #ccc !important; }
+    tr.slot-five   > td { border-top: 0.1pt solid #e8e8e8 !important; }
+
+    /* ── 正午ライン（二重線） ── */
+    tr.noon-row > td { border-top: 2pt double #000 !important; }
+
+    /* ── フッタ ── */
+    .page-footer {
+      font-size: 6pt; color: #666; text-align: right;
+      margin-top: 1.5mm;
+    }
+
+    /* ── 画面プレビュー用調整（印刷以外） ── */
+    @media screen {
+      body { background: #e8e8e8; padding: 8mm; }
+      .print-page {
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+        margin-bottom: 12mm;
+        padding: 10mm;
+        max-width: 210mm;
+        margin-left: auto; margin-right: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="no-print">
+    <button onclick="window.print()">🖨 印刷</button>
+    <button onclick="window.close()">✕ 閉じる</button>
+  </div>
+
+{% for page_lanes in lane_pages %}
+<div class="print-page">
+
+  {# ── ページヘッダ ── #}
+  <div class="page-header">
+    <span>旭川市立大学　オープンキャンパス　スケジュール表</span>
+    <span class="page-header-meta">
+      {{ occasion.year }}年度 {{ occasion.name }}　{{ occasion.date }}
+      {% if lane_pages | length > 1 %}
+        &nbsp;（{{ loop.index }} / {{ lane_pages | length }} ページ）
+      {% endif %}
+    </span>
+  </div>
+
+  {# ── テーブル ── #}
+  <table class="schedule-table">
+    <colgroup>
+      <col class="col-time">
+      {% for lane in page_lanes %}<col>{% endfor %}
+    </colgroup>
+    <thead>
+      <tr>
+        <th class="col-time">時間</th>
+        {% for lane in page_lanes %}
+        <th>{{ lane.name }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for slot in matrix.slots %}
+      {% set slot_type = matrix.slot_types.get(slot, 'five') %}
+      <tr class="slot-{{ slot_type }}{% if slot == '12:00' %} noon-row{% endif %}">
+
+        {# 時間列 #}
+        <td class="time-cell">
+          {% if slot_type in ('hour', 'half') %}{{ slot }}{% endif %}
+        </td>
+
+        {# 実施枠列（このページの列のみ） #}
+        {% for lane in page_lanes %}
+          {% set cell = matrix.cells.get(slot, {}).get(lane.id) %}
+          {% if cell is none %}
+            <td class="empty-cell"></td>
+          {% elif cell.get('skip') %}
+            {# rowspan でカバー済み #}
+          {% elif cell.get('note') %}
+            {# 備考枠レーン：ノートセル #}
+            <td class="note-cell" rowspan="{{ cell.rowspan }}">{{ cell.note.content }}</td>
+          {% else %}
+            {% set ev = cell.event %}
+            <td class="event-cell" rowspan="{{ cell.rowspan }}">
+              <div class="event-title">{{ ev.title }}</div>
+              {% if ev.venue_name %}
+              <div class="event-meta">📍 {{ ev.venue_name }}</div>
+              {% endif %}
+              {% for a in ev.assignments %}
+              <div class="event-meta">{{ a.role_name }}：{{ a.staff_name }}</div>
+              {% endfor %}
+              {% if ev.note %}
+              <div class="event-note-text">{{ ev.note }}</div>
+              {% endif %}
+              <div class="event-time">{{ ev.start_time }}–{{ ev.end_time }}</div>
+            </td>
+          {% endif %}
+        {% endfor %}
+
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {# ── ページフッタ ── #}
+  <div class="page-footer">
+    印刷日: {{ today }}　／
+    実施枠: {{ page_lanes | map(attribute='name') | join('・') }}
+  </div>
+
+</div>
+{% endfor %}
+
+</body>
+</html>
