@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "OCスケジューラ",
+      "runtimeExecutable": "/Users/toru/Library/CloudStorage/OneDrive-公立大学法人旭川市立大学/仕事/Claude/OCスケジュール作成アプリ/oc-scheduler/venv/bin/python",
+      "runtimeArgs": ["oc-scheduler/app.py"],
+      "port": 5000,
+      "autoPort": true
+    }
+  ]
+}
