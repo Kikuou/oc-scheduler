@@ -2,9 +2,13 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# data/ ディレクトリがなければ自動作成（Render初回起動時など）
-DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(DATA_DIR, exist_ok=True)
+# Render環境では /tmp にDBを配置（アプリディレクトリは書き込み不可）
+# ローカルでは従来通り data/ ディレクトリを使用
+if os.environ.get("RENDER"):
+    DATA_DIR = "/tmp"
+else:
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    os.makedirs(DATA_DIR, exist_ok=True)
 
 DB_PATH = os.path.join(DATA_DIR, "oc_schedule.db")
 DATABASE_URL = f"sqlite:///{DB_PATH}"
