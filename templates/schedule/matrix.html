@@ -473,14 +473,14 @@ const ROLES = [
   {id: {{ r.id }}, name: "{{ r.name }}"},
   {% endfor %}
 ];
-const EVENT_MAP = {{ matrix.events | tojson }};
+const EVENT_MAP = {{ (matrix.events or []) | tojson }};
 const OCC_START = "{{ occasion.day_start_time }}";
 const OCC_END   = "{{ occasion.day_end_time }}";
 const TIME_STEP = 5; // 時間ドロップダウンの刻み（分）
-const LANES     = {{ matrix.lanes | tojson }};
-const LANE_IDS  = {{ matrix.lane_ids | tojson }};
-const NOTE_MAP  = {{ matrix.notes | tojson }};
-const NOTE_SETS = {{ note_sets | tojson }};
+const LANES     = {{ (matrix.lanes or []) | tojson }};
+const LANE_IDS  = {{ (matrix.lane_ids or []) | tojson }};
+const NOTE_MAP  = {{ (matrix.notes or []) | tojson }};
+const NOTE_SETS = {{ (note_sets or []) | tojson }};
 </script>
 {% endblock %}
 

@@ -32,7 +32,9 @@ def build_occasion_matrix(occasion_id: int, period: str = "all", lane_ids_filter
     o = db.get(Occasion, occasion_id)
     if not o:
         db.close()
-        return {"slots": [], "lanes": [], "cells": {}, "events": []}
+        return {"slots": [], "lanes": [], "cells": {}, "events": [],
+                "lane_ids": [], "slot_types": {}, "notes": [],
+                "note_column": {}, "has_legacy_notes": False}
 
     # 開催の使用実施枠を取得
     opl_list = (db.query(OccasionProgramLane)
@@ -50,9 +52,15 @@ def build_occasion_matrix(occasion_id: int, period: str = "all", lane_ids_filter
     for opl in opl_list:
         lanes_map[opl.program_lane_id] = opl.program_lane
 
+    # lane_ids を明示的に int リストへ正規化（PostgreSQLで型が異なる場合の対策）
+    lane_ids = [int(lid) for lid in lane_ids]
+
     if not lane_ids:
         db.close()
-        return {"slots": [], "lanes": [], "cells": {}, "events": []}
+        return {"slots": [], "cells": {}, "events": [], "slot_types": {},
+                "lane_ids": [], "notes": [], "note_column": {}, "has_legacy_notes": False,
+                "lanes": [{"id": l.id, "name": l.name, "lane_type": l.lane_type}
+                           for l in lanes_map.values()]}
 
     lanes = [lanes_map[lid] for lid in lane_ids if lid in lanes_map]
 
