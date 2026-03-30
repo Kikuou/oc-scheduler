@@ -1,154 +1,170 @@
 # OCスケジューラ
 
-旭川市立大学のオープンキャンパス（OC）スケジュール作成・管理アプリケーション
+旭川市立大学のオープンキャンパス（OC）スケジュール作成・管理Webアプリケーション
 
-## 概要
+---
 
-オープンキャンパスのイベント（学科説明、体験授業、フリートークなど）をスケジュール管理し、複数の学科ごとに異なるプログラムを構成・編集・出力できるWebアプリケーションです。
+## 開発前提（重要）
+
+> **このプロジェクトの全開発は `docs/dev_rules.md` の方針に従うこと。**
+> 明示的な指示がない場合も以下を自動的に適用する。
+
+| 項目 | 設定 |
+|------|------|
+| ローカルDB | SQLite（`data/oc_schedule.db`）|
+| 本番DB | PostgreSQL（Neon）|
+| デプロイ先 | Render |
+| バージョン管理 | GitHub |
+| DB切替方法 | `DATABASE_URL` 環境変数 |
+
+**設計上の大原則**
+- 空DB（テーブルが全て空）でも動作すること
+- NULL・空配列・未登録データで落ちないこと
+- PostgreSQLのFK・UNIQUE制約を常に意識すること
+
+---
 
 ## 主な機能
 
 ### スケジューラ
-- **ドラッグ&ドロップ操作**: イベントを時間帯に自由に配置
-- **複数学科対応**: 食物栄養学科、こども地域学科などを同時管理
-- **列の順序カスタマイズ**: ドラッグで実施枠の表示順序を変更
-- **イベント情報表示**: 教室、時間、担当者、備考を一覧表示
-- **リアルタイムプレビュー**: 編集内容がすぐに反映
+- ドラッグ&ドロップでイベントを配置・移動・リサイズ
+- 複数実施枠（学科）を列として管理
+- 列の表示/非表示・ドラッグで表示順変更
+- 10分グリッド・30分・60分で視覚的に区別された罫線
+- イベントに教室・時間・所要時間・担当者を表示
 
 ### マスタ管理
-- **イベント（実施枠）管理**: タイトル、所要時間、デフォルト教室などを一元管理
-- **スタッフ（担当者）管理**: 教員等の情報管理
-- **備考タイプ管理**: カテゴリ化された備考情報の管理
+- 実施枠・会場・スタッフ・役割・内容テンプレートを一元管理
+- CSVインポート対応（スタッフ）
 
 ### 帳票出力
-- **PDF生成**: スケジュール表をPDF出力
-- **列の選択**: 表示する学科を選択可能
-- **レイアウト**: 印刷対応のレイアウト設定
+- スケジュール表・担当者一覧をPDF出力
+- スケジューラで選択中の実施枠が帳票にそのまま反映
+
+---
 
 ## 技術スタック
 
-- **Backend**: Flask (Python)
-- **Frontend**: HTML5, CSS3, JavaScript
-- **Database**: SQLite3
-- **UI Framework**: Bootstrap 5
-- **Drag & Drop**: SortableJS, HTML5 Drag and Drop API
+| カテゴリ | 技術 |
+|----------|------|
+| Backend | Flask（Python） |
+| ORM | SQLAlchemy 2.0 |
+| ローカルDB | SQLite |
+| 本番DB | PostgreSQL（Neon） |
+| デプロイ | Render（gunicorn） |
+| Frontend | Bootstrap 5, SortableJS |
+| PDF生成 | ReportLab |
 
-## セットアップ
+---
 
-### 必要な環境
-- Python 3.8+
-- pip
-
-### インストール
+## ローカル起動手順
 
 ```bash
-# リポジトリをクローン
-git clone https://github.com/your-username/oc-scheduler.git
+# 1. リポジトリをクローン
+git clone https://github.com/Kikuou/oc-scheduler.git
 cd oc-scheduler
 
-# 仮想環境を作成
-python -m venv venv
-source venv/bin/activate  # macOS/Linux
-# または
-venv\Scripts\activate  # Windows
+# 2. 仮想環境を作成・有効化
+python3 -m venv venv
+source venv/bin/activate        # macOS/Linux
+# venv\Scripts\activate         # Windows
 
-# 依存関係をインストール
+# 3. 依存関係をインストール
 pip install -r requirements.txt
 
-# データベースを初期化
-python init_db.py
-
-# アプリを起動
+# 4. 起動（DBは自動作成）
 python app.py
+# → http://localhost:5100
 ```
 
-アプリは `http://localhost:5000` で利用可能になります。
+環境変数を設定しない場合、SQLiteが自動的に使用されます。
 
-## 使用方法
+---
 
-### 1. 開催管理
-- 新規開催を作成（日程、時間、実施枠を設定）
-- 複数の開催を並行管理
+## 本番（Render）デプロイ設定
 
-### 2. マスタ管理
-- イベント、スタッフ、備考の情報を事前登録
+| 項目 | 値 |
+|------|----|
+| Environment | Python |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `gunicorn app:app` |
 
-### 3. スケジュール作成
-- スケジューラにイベントをドラッグ&ドロップ
-- 各学科の異なるプログラムを構成
-- リアルタイムで内容を確認
+**Environment Variables（Render の設定画面で登録）**
 
-### 4. 帳票出力
-- PDF出力ボタンから帳票を生成
-- 必要な学科を選択して出力
+| 変数名 | 内容 |
+|--------|------|
+| `DATABASE_URL` | Neon の Connection String |
+| `SECRET_KEY` | ランダムな長い文字列（`python3 -c "import secrets; print(secrets.token_hex(32))"` で生成） |
+
+---
+
+## マスタデータ移行（初回のみ）
+
+ローカルSQLiteのマスタデータをNeonへ投入する場合：
+
+```bash
+# 確認のみ（書き込みなし）
+DATABASE_URL="postgresql://..." python3 migrate_to_postgres.py --dry-run
+
+# 投入
+DATABASE_URL="postgresql://..." python3 migrate_to_postgres.py
+
+# やり直し（全削除→再投入）
+DATABASE_URL="postgresql://..." python3 migrate_to_postgres.py --clean
+```
+
+移行対象：`roles` / `venues` / `staff` / `program_lanes` / `content_templates`
+
+---
 
 ## ファイル構成
 
 ```
-oc-scheduler/
-├── app.py                      # メインアプリケーション
-├── models.py                   # データベースモデル
-├── routes/                     # ルートハンドラー
-│   ├── occasions.py            # 開催管理
-│   ├── masters.py              # マスタ管理
-│   ├── schedules.py            # スケジュール管理
-│   └── reports.py              # 帳票出力
-├── services/                   # ビジネスロジック
-│   └── schedule_matrix.py      # スケジュール行列計算
-├── templates/                  # HTMLテンプレート
+.
+├── app.py                      # Flask アプリ・Blueprint登録・init_db()
+├── config.py                   # DATABASE_URL / SECRET_KEY の解決
+├── requirements.txt
+├── Procfile                    # gunicorn app:app
+├── migrate_to_postgres.py      # マスタ移行スクリプト
+├── db/
+│   ├── database.py             # engine, SessionLocal, init_db()
+│   └── models.py               # SQLAlchemy モデル
+├── routes/                     # Blueprint
+│   ├── occasions.py
+│   ├── events.py
+│   ├── master.py
+│   ├── reports.py
+│   ├── notes.py
+│   └── year_update.py
+├── services/
+│   ├── schedule_matrix.py      # スケジュールマトリクス生成
+│   ├── pdf_generator.py
+│   └── year_update_svc.py
+├── templates/
+│   ├── base.html
 │   ├── index.html
-│   ├── schedule/               # スケジューラ画面
-│   └── reports/                # 帳票出力画面
-├── static/                     # 静的ファイル
-│   ├── css/
-│   │   └── main.css
-│   └── js/
-│       └── schedule.js
-├── requirements.txt            # Python依存関係
-└── README.md                   # このファイル
+│   ├── schedule/
+│   ├── reports/
+│   ├── master/
+│   └── year_update/
+├── static/
+│   ├── css/main.css
+│   └── js/event_form.js
+└── docs/
+    └── dev_rules.md            # 開発ルール（必読）
 ```
 
-## 主な改善点（最新）
+---
 
-### v1.0
-- イベント表示の改善
-  - 短時間イベントも教室・時間情報が見やすく表示
-  - タイトルの右側に所要時間を表示
-  - 行高を24pxに増加
+## 開発ルール
 
-- グリッド線の視認性向上
-  - 60分単位: 濃い黒い太線
-  - 30分単位: 中程度の灰色の太線
-  - 10分単位: 薄い灰色の中線
-  - 5分単位: 薄灰色の薄線
+詳細は [`docs/dev_rules.md`](docs/dev_rules.md) を参照。
 
-- スケジューラ機能
-  - ドラッグ&ドロップで列順序を変更可能
-  - 列の表示・非表示を選択可能
-  - localStorage で選択状態を保存
-  - 帳票出力時に選択状態を反映
-
-## トラブルシューティング
-
-### データベースエラーが出る場合
-```bash
-# データベースをリセット
-rm instance/oc_scheduler.db
-python init_db.py
-```
-
-### ポート 5000 が既に使用されている場合
-```bash
-python app.py --port 5001
-```
-
-## ライセンス
-
-旭川市立大学内での使用を想定しています。
-
-## 問い合わせ
-
-問題や機能リクエストはIssueで報告してください。
+主なルール：
+- `DATABASE_URL` がある場合はPostgres、ない場合はSQLiteを自動選択
+- `pool_pre_ping=True` でNeon接続断に対応
+- テンプレートの `tojson` には `(value or [])` フォールバックを付ける
+- 早期リターンは正常ルートと同じキーセットを返す
 
 ---
 
