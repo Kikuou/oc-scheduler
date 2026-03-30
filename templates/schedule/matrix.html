@@ -1106,16 +1106,25 @@ async function saveEvent() {
   };
 
   const url = eventId ? `/api/event/${eventId}/update` : '/api/event/create';
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (data.ok) {
-    await softReload();
-  } else {
-    alert('保存に失敗しました: ' + (data.error || ''));
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      alert('保存に失敗しました（サーバーエラー ' + res.status + '）\n' + txt.slice(0, 200));
+      return;
+    }
+    const data = await res.json();
+    if (data.ok) {
+      await softReload();
+    } else {
+      alert('保存に失敗しました: ' + (data.error || ''));
+    }
+  } catch (err) {
+    alert('通信エラーが発生しました: ' + err.message);
   }
 }
 

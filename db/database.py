@@ -72,6 +72,18 @@ def init_db():
                     "ADD COLUMN event_type VARCHAR(20) NOT NULL DEFAULT 'normal'"
                 ))
                 conn.commit()
+    # events.venue_id の NOT NULL 制約を外す（移動イベントは会場なし）
+    # PostgreSQL: ALTER TABLE events ALTER COLUMN venue_id DROP NOT NULL
+    # SQLite  : nullable 変更は再作成が必要だが、新規DBは既に nullable なのでスキップ
+    if insp.has_table("events") and DATABASE_URL.startswith("postgresql"):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE events ALTER COLUMN venue_id DROP NOT NULL"
+                ))
+                conn.commit()
+        except Exception:
+            pass  # すでに nullable の場合は無視
     # 「移動引率」ロールが存在しない場合は自動作成
     try:
         with engine.connect() as conn:
