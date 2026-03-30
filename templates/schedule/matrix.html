@@ -216,7 +216,7 @@
                 <div class="event-header">
                   <div class="event-title-row">
                     {% if is_movement %}<span class="movement-label">移動</span>{% endif %}
-                    <div class="event-title">{{ ev.title }}</div>
+                    {% if not is_movement %}<div class="event-title">{{ ev.title }}</div>{% endif %}
                     {% if ev.duration_min %}
                     <div class="event-duration">⏱ {{ ev.duration_min }}分</div>
                     {% endif %}
