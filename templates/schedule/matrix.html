@@ -473,20 +473,65 @@ const ROLES = [
   {id: {{ r.id }}, name: "{{ r.name }}"},
   {% endfor %}
 ];
-const EVENT_MAP = {{ (matrix.events or []) | tojson }};
+let EVENT_MAP = {{ (matrix.events or []) | tojson }};
 const OCC_START = "{{ occasion.day_start_time }}";
 const OCC_END   = "{{ occasion.day_end_time }}";
 const TIME_STEP = 5; // 時間ドロップダウンの刻み（分）
 const LANES     = {{ (matrix.lanes or []) | tojson }};
 const LANE_IDS  = {{ (matrix.lane_ids or []) | tojson }};
-const NOTE_MAP  = {{ (matrix.notes or []) | tojson }};
+let NOTE_MAP  = {{ (matrix.notes or []) | tojson }};
 const NOTE_SETS = {{ (note_sets or []) | tojson }};
+</script>
+{# ── softReload 用: events/notes を JSON として埋め込み（DOMParser 経由で再取得） ── #}
+<script id="matrix-data-json" type="application/json">
+{{ {"events": (matrix.events or []), "notes": (matrix.notes or [])} | tojson }}
 </script>
 {% endblock %}
 
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
 <script>
+// ════════════════════════════════════════════════════════
+// softReload: location.reload() の代替
+//   API保存後に tbody だけ差し替え → EVENT_MAP / NOTE_MAP を更新
+//   列構造が変わる操作（レーン並び替え等）は従来の location.reload() を維持
+// ════════════════════════════════════════════════════════
+async function softReload() {
+  const scrollY = window.scrollY;
+  try {
+    // 現在のページ HTML を fetch（ブラウザの再描画なし）
+    const resp = await fetch(location.href);
+    if (!resp.ok) { location.reload(); return; }
+    const html = await resp.text();
+    const parser = new DOMParser();
+    const newDoc = parser.parseFromString(html, 'text/html');
+
+    // ① tbody を差し替え（thead / 列構造はそのまま維持）
+    const newTbody = newDoc.querySelector('#matrixTable tbody');
+    const oldTbody = document.querySelector('#matrixTable tbody');
+    if (newTbody && oldTbody) {
+      oldTbody.replaceWith(newTbody);
+    }
+
+    // ② EVENT_MAP / NOTE_MAP を新しいデータで更新
+    const dataEl = newDoc.getElementById('matrix-data-json');
+    if (dataEl) {
+      try {
+        const d = JSON.parse(dataEl.textContent);
+        EVENT_MAP = d.events || [];
+        NOTE_MAP  = d.notes  || [];
+      } catch (_) { /* JSON parse 失敗時は古いデータのまま */ }
+    }
+  } catch (err) {
+    // ネットワークエラーなどのフォールバック
+    console.warn('softReload failed, falling back to location.reload():', err);
+    location.reload();
+    return;
+  }
+  // スクロール位置を復元
+  window.scrollTo(0, scrollY);
+}
+
 // ─── ページロード時に現在の表示中実施枠をLocalStorageへ保存 ────
 document.addEventListener('DOMContentLoaded', function() {
   const visibleLanes = [...document.querySelectorAll('.lane-toggle-btn.btn-success')]
@@ -959,7 +1004,7 @@ async function saveEvent() {
   });
   const data = await res.json();
   if (data.ok) {
-    location.reload();
+    await softReload();
   } else {
     alert('保存に失敗しました: ' + (data.error || ''));
   }
@@ -1001,7 +1046,8 @@ async function execDelete(eventId, scope) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scope }),
   });
-  if ((await res.json()).ok) location.reload();
+  const delData = await res.json();
+  if (delData.ok) await softReload();
 }
 
 
@@ -1179,8 +1225,7 @@ async function updateEventTimeAPI(eventId, newStart, newDurMin, newLaneIds) {
   });
   const data = await res.json();
   if (!data.ok) { showToast('更新に失敗しました: ' + (data.error || '')); return; }
-  sessionStorage.setItem('matrixScrollY', window.scrollY);
-  location.reload();
+  await softReload();
 }
 
 // ★ コピー処理（別レーンに新規イベントとして作成）
@@ -1205,8 +1250,7 @@ async function copyEventAPI(eventId, newStart, newDurMin, targetLaneId) {
   });
   const data = await res.json();
   if (!data.ok) { showToast('コピーに失敗しました: ' + (data.error || '')); return; }
-  sessionStorage.setItem('matrixScrollY', window.scrollY);
-  location.reload();
+  await softReload();
 }
 
 // ════════════════════════════════════════════════════════
@@ -1651,7 +1695,7 @@ async function saveNote() {
 
   const res  = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
   const data = await res.json();
-  if (data.ok) { sessionStorage.setItem('matrixScrollY', window.scrollY); location.reload(); }
+  if (data.ok) { await softReload(); }
   else alert('保存に失敗しました: ' + (data.error || ''));
 }
 
@@ -1660,7 +1704,7 @@ async function deleteNote() {
   if (!noteId || !confirm('この備考を削除しますか？')) return;
   const res  = await fetch(`/api/note/${noteId}/delete`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
   const data = await res.json();
-  if (data.ok) { sessionStorage.setItem('matrixScrollY', window.scrollY); location.reload(); }
+  if (data.ok) { await softReload(); }
   else alert('削除に失敗しました');
 }
 
@@ -1747,7 +1791,7 @@ async function updateNoteTimeAPI(noteId, newStart, newEnd) {
     body: JSON.stringify({ start_time: newStart, end_time: newEnd }),
   });
   const data = await res.json();
-  if (data.ok) { sessionStorage.setItem('matrixScrollY', window.scrollY); location.reload(); }
+  if (data.ok) { await softReload(); }
   else showToast('備考の更新に失敗しました: ' + (data.error || ''));
 }
 
