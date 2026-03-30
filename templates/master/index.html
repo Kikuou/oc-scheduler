@@ -245,7 +245,7 @@
       </td>
       <td>{{ '有効' if pl.is_active else '無効' }}</td>
       <td class="no-print" style="white-space:nowrap">
-        <button class="btn btn-outline-secondary btn-sm" onclick="openLaneEdit({{ pl.id }}, '{{ pl.name }}', '{{ pl.lane_type }}')">編集</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="openLaneEdit({{ pl.id }}, {{ pl.name | tojson }}, {{ pl.lane_type | tojson }})">編集</button>
         <form method="post" action="/master/lane/{{ pl.id }}/toggle" class="d-inline">
           <button class="btn btn-outline-{{ 'warning' if pl.is_active else 'success' }} btn-sm">{{ '無効化' if pl.is_active else '有効化' }}</button>
         </form>

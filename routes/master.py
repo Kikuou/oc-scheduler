@@ -337,15 +337,27 @@ def lane_add():
 def lane_edit(lid):
     db = get_db()
     pl = db.get(ProgramLane, lid)
-    if pl:
+    if not pl:
+        db.close()
+        flash("実施枠が見つかりません", "error")
+        return redirect(url_for("master.index", tab="lane"))
+    try:
         pl.name = request.form["name"].strip()
         if "lane_type" in request.form:
             lt = request.form["lane_type"]
             if lt in ("normal", "remark"):
                 pl.lane_type = lt
         db.commit()
-    db.close()
-    flash("実施枠を更新しました", "success")
+        flash("実施枠を更新しました", "success")
+    except Exception as e:
+        db.rollback()
+        err = str(e)
+        if "unique" in err.lower() or "duplicate" in err.lower():
+            flash("同じ名前の実施枠がすでに存在します", "error")
+        else:
+            flash(f"更新に失敗しました: {err}", "error")
+    finally:
+        db.close()
     return redirect(url_for("master.index", tab="lane"))
 
 
