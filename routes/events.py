@@ -4,6 +4,7 @@ from db.database import SessionLocal
 from db.models import Event, EventAssignment, Venue, Staff, Role, ContentTemplate, Occasion, ProgramLane, OccasionProgramLane
 from datetime import datetime, timedelta
 from services.conflict_checker import check_staff_conflict, check_venue_conflict, check_lane_conflict
+from sqlalchemy.orm import selectinload
 
 bp = Blueprint("events", __name__)
 
@@ -58,7 +59,15 @@ def api_events(occasion_id):
         return jsonify([])
     opl_list = db.query(OccasionProgramLane).filter_by(occasion_id=occasion_id).order_by(OccasionProgramLane.sort_order).all()
     lane_order = {opl.program_lane_id: i for i, opl in enumerate(opl_list)}
-    events = db.query(Event).filter(Event.occasion_id == occasion_id).all()
+    events = (db.query(Event)
+              .options(
+                  selectinload(Event.assignments).selectinload(EventAssignment.staff),
+                  selectinload(Event.assignments).selectinload(EventAssignment.role),
+                  selectinload(Event.venue),
+                  selectinload(Event.program_lane),
+              )
+              .filter(Event.occasion_id == occasion_id)
+              .all())
     result = []
     for e in events:
         assignments = [{"staff_name": a.staff.name, "role_name": a.role.name,

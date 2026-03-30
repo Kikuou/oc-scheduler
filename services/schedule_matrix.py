@@ -1,6 +1,7 @@
 """時間×実施枠マトリクス生成サービス"""
 from db.database import SessionLocal
 from db.models import Event, EventAssignment, Occasion, OccasionProgramLane, ProgramLane, PrintNoteRow, PrintNoteSet
+from sqlalchemy.orm import selectinload
 
 
 SLOT_MIN = 5  # スロット単位（分）
@@ -101,7 +102,17 @@ def build_occasion_matrix(occasion_id: int, period: str = "all", lane_ids_filter
                 "cells": {}, "events": [], "slot_types": {}}
 
     # イベント取得（開始時刻順に処理して先着イベントを優先）
-    events = db.query(Event).filter(Event.occasion_id == occasion_id).order_by(Event.start_time).all()
+    # selectinload で N+1 を防ぐ：assignments → staff/role、venue、program_lane を一括取得
+    events = (db.query(Event)
+              .options(
+                  selectinload(Event.assignments).selectinload(EventAssignment.staff),
+                  selectinload(Event.assignments).selectinload(EventAssignment.role),
+                  selectinload(Event.venue),
+                  selectinload(Event.program_lane),
+              )
+              .filter(Event.occasion_id == occasion_id)
+              .order_by(Event.start_time)
+              .all())
 
     # イベント情報をまとめる
     event_map: dict[int, dict] = {}
