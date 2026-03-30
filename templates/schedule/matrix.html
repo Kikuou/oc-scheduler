@@ -1438,7 +1438,7 @@ async function onResizeEnd() {
   tbl.addEventListener('mousedown', function(e) {
     if (e.button !== 0) return;
 
-    // リサイズハンドル（備考 or イベント）
+    // 備考リサイズハンドル（クラスベース検出を維持）
     if (e.target.classList.contains('resize-handle-top') ||
         e.target.classList.contains('resize-handle-bottom')) {
       const dir = e.target.classList.contains('resize-handle-top') ? 'top' : 'bottom';
@@ -1449,11 +1449,11 @@ async function onResizeEnd() {
         startNoteResize(parseInt(noteTd.dataset.noteId), dir, e);
         return;
       }
-      // イベントリサイズ
-      const td = e.target.closest('.event-cell');
-      if (!td || !td.dataset.eventId) return;
+      // イベントリサイズ（ハンドル要素への直接クリック時のフォールバック）
+      const tdFb = e.target.closest('.event-cell');
+      if (!tdFb || !tdFb.dataset.eventId) return;
       e.preventDefault(); e.stopPropagation();
-      startResize(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), dir, e);
+      startResize(parseInt(tdFb.dataset.eventId), parseInt(tdFb.dataset.laneId), dir, e);
       return;
     }
 
@@ -1478,14 +1478,49 @@ async function onResizeEnd() {
       return;
     }
 
-    // イベントブロック（ドラッグ or クリック）
+    // イベントブロック：位置ベースでリサイズ/ドラッグを判定
     const block = e.target.closest('.event-block');
     if (!block) return;
     const td = block.closest('.event-cell');
     if (!td || !td.dataset.eventId) return;
     e.preventDefault(); e.stopPropagation();
-    startEvDrag(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), e);
+
+    const rect = block.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    // リサイズ判定ゾーン：高さに応じて可変（最小8px・最大14px・高さの35%以内）
+    const RESIZE_ZONE = Math.max(8, Math.min(14, rect.height * 0.35));
+
+    if (relY <= RESIZE_ZONE) {
+      startResize(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), 'top', e);
+    } else if (relY >= rect.height - RESIZE_ZONE) {
+      startResize(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), 'bottom', e);
+    } else {
+      startEvDrag(parseInt(td.dataset.eventId), parseInt(td.dataset.laneId), e);
+    }
   }, { capture: false });
+
+  // ── イベントブロック上のカーソルをホバー位置に応じてリアルタイム更新 ──
+  // 上下端ゾーンでは ns-resize、中央では grab を表示してリサイズ/移動を視覚化
+  let _lastHoveredEvBlock = null;
+  tbl.addEventListener('mousemove', function(e) {
+    if (evDragActive || resizeActive || pendingEvDrag) return;
+    const block = e.target.closest('.event-block');
+
+    // 前のブロックのインラインカーソルをリセット
+    if (_lastHoveredEvBlock && _lastHoveredEvBlock !== block) {
+      _lastHoveredEvBlock.style.cursor = '';
+      _lastHoveredEvBlock = null;
+    }
+    if (!block) return;
+
+    const rect = block.getBoundingClientRect();
+    const relY = e.clientY - rect.top;
+    const RESIZE_ZONE = Math.max(8, Math.min(14, rect.height * 0.35));
+
+    block.style.cursor = (relY <= RESIZE_ZONE || relY >= rect.height - RESIZE_ZONE)
+      ? 'ns-resize' : 'grab';
+    _lastHoveredEvBlock = block;
+  });
 })();
 
 // ドキュメントレベルの mousemove / mouseup

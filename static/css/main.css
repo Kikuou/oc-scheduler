@@ -124,17 +124,17 @@
   position: absolute;
   left: 0;
   right: 0;
-  height: 6px;
+  height: 10px;          /* 6px → 10px に拡大（当たり判定向上） */
   cursor: ns-resize;
   z-index: 5;
   border-radius: 3px;
-  transition: background 0.1s;
+  transition: background 0.15s;
 }
 .resize-handle-top { top: 0; }
 .resize-handle-bottom { bottom: 0; }
 .resize-handle-top:hover,
 .resize-handle-bottom:hover {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.22);
 }
 
 /* ── ドラッグゴースト ── */
