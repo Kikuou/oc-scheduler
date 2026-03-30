@@ -152,13 +152,14 @@ class Event(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     occasion_id = Column(Integer, ForeignKey("occasions.id", ondelete="CASCADE"), nullable=False)
     program_lane_id = Column(Integer, ForeignKey("program_lanes.id"), nullable=True)
-    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=False)
+    venue_id = Column(Integer, ForeignKey("venues.id"), nullable=True)   # 移動イベントは会場なし
     start_time = Column(String(5), nullable=False)   # "09:20"
     end_time = Column(String(5), nullable=False)     # "10:00"
     duration_min = Column(Integer, nullable=False)
     title = Column(String(200), nullable=False)
     note = Column(Text)
     event_group_id = Column(String(36), nullable=True, index=True)  # 複数実施枠一括登録グループID
+    event_type = Column(String(20), nullable=False, default="normal")  # "normal" or "movement"
 
     occasion = relationship("Occasion", back_populates="events")
     program_lane = relationship("ProgramLane", back_populates="events")

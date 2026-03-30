@@ -129,6 +129,10 @@ def api_create():
         db.close()
         return jsonify({"ok": False, "error": "実施枠を1つ以上選択してください"}), 400
 
+    event_type = data.get("event_type", "normal")
+    if event_type not in ("normal", "movement"):
+        event_type = "normal"
+
     # 各実施枠の時間重複チェック
     for lid in lane_ids:
         conflicts = check_lane_conflict(occasion_id, start, end, lid)
@@ -145,22 +149,39 @@ def api_create():
     # 複数実施枠の場合はグループIDを生成
     group_id = str(_uuid.uuid4()) if len(lane_ids) > 1 else None
 
+    # 移動イベントの場合、担当者の役割を「移動引率」に固定
+    assignments_data = data.get("assignments", [])
+    if event_type == "movement":
+        from sqlalchemy import text as _text
+        with db.bind.connect() as _conn:
+            row = _conn.execute(_text("SELECT id FROM roles WHERE name = '移動引率' LIMIT 1")).fetchone()
+            movement_role_id = row[0] if row else None
+        if movement_role_id:
+            assignments_data = [
+                {"staff_id": a["staff_id"], "role_id": movement_role_id}
+                for a in assignments_data if a.get("staff_id")
+            ]
+
+    venue_id_raw = data.get("venue_id")
+    venue_id = int(venue_id_raw) if venue_id_raw else None
+
     created_ids = []
     for lid in lane_ids:
         e = Event(
             occasion_id=occasion_id,
             program_lane_id=lid,
-            venue_id=int(data["venue_id"]),
+            venue_id=venue_id,
             start_time=start,
             end_time=end,
             duration_min=duration,
             title=data["title"].strip(),
             note=(data.get("note") or "").strip() or None,
             event_group_id=group_id,
+            event_type=event_type,
         )
         db.add(e)
         db.flush()
-        for a in data.get("assignments", []):
+        for a in assignments_data:
             if a.get("staff_id") and a.get("role_id"):
                 db.add(EventAssignment(
                     event_id=e.id,
@@ -204,6 +225,10 @@ def api_update(event_id):
         db.close()
         return jsonify({"ok": False, "error": "実施枠を1つ以上選択してください"}), 400
 
+    event_type = data.get("event_type", e.event_type or "normal")
+    if event_type not in ("normal", "movement"):
+        event_type = "normal"
+
     # 各実施枠の重複チェック（グループ内イベントを全て除外）
     for lid in new_lane_ids:
         conflicts = check_lane_conflict(
@@ -225,6 +250,22 @@ def api_update(event_id):
     else:
         new_group_id = None
 
+    # 移動イベントの場合、担当者の役割を「移動引率」に固定
+    assignments_data = data.get("assignments", [])
+    if event_type == "movement":
+        from sqlalchemy import text as _text
+        with db.bind.connect() as _conn:
+            row = _conn.execute(_text("SELECT id FROM roles WHERE name = '移動引率' LIMIT 1")).fetchone()
+            movement_role_id = row[0] if row else None
+        if movement_role_id:
+            assignments_data = [
+                {"staff_id": a["staff_id"], "role_id": movement_role_id}
+                for a in assignments_data if a.get("staff_id")
+            ]
+
+    venue_id_raw = data.get("venue_id")
+    venue_id = int(venue_id_raw) if venue_id_raw else None
+
     existing_lane_map = {sib.program_lane_id: sib for sib in siblings}
 
     # 削除された実施枠のイベントを削除
@@ -236,13 +277,14 @@ def api_update(event_id):
     # 既存実施枠を更新、新規実施枠はイベントを作成
     for lid in new_lane_ids:
         common_fields = {
-            "venue_id": int(data["venue_id"]),
+            "venue_id": venue_id,
             "start_time": start,
             "end_time": end,
             "duration_min": duration,
             "title": data["title"].strip(),
             "note": (data.get("note") or "").strip() or None,
             "event_group_id": new_group_id,
+            "event_type": event_type,
         }
         if lid in existing_lane_map:
             sib = existing_lane_map[lid]
@@ -258,7 +300,7 @@ def api_update(event_id):
             db.flush()
             target_id = new_e.id
 
-        for a in data.get("assignments", []):
+        for a in assignments_data:
             if a.get("staff_id") and a.get("role_id"):
                 db.add(EventAssignment(
                     event_id=target_id,

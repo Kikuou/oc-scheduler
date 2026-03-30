@@ -62,4 +62,40 @@ def init_db():
                     "ADD COLUMN program_lane_id INTEGER REFERENCES program_lanes(id)"
                 ))
                 conn.commit()
+    # events に event_type カラムを追加（移動イベント対応）
+    if insp.has_table("events"):
+        cols = {c["name"] for c in insp.get_columns("events")}
+        if "event_type" not in cols:
+            with engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE events "
+                    "ADD COLUMN event_type VARCHAR(20) NOT NULL DEFAULT 'normal'"
+                ))
+                conn.commit()
+    # 「移動引率」ロールが存在しない場合は自動作成
+    try:
+        with engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT id FROM roles WHERE name = '移動引率' LIMIT 1")
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    text("INSERT INTO roles (name, sort_order) VALUES ('移動引率', 999)")
+                )
+                conn.commit()
+    except Exception:
+        pass  # roles テーブルがまだない場合は create_all 後に対応
     Base.metadata.create_all(bind=engine)
+    # create_all 後に再試行（テーブル新規作成直後の場合）
+    try:
+        with engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT id FROM roles WHERE name = '移動引率' LIMIT 1")
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    text("INSERT INTO roles (name, sort_order) VALUES ('移動引率', 999)")
+                )
+                conn.commit()
+    except Exception:
+        pass

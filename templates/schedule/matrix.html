@@ -200,7 +200,8 @@
             {% endif %}
             {% set tooltip_text = tooltip_lines|join("\n") %}
 
-            <td class="event-cell {{ lane_cls }}"
+            {% set is_movement = ev.event_type == 'movement' %}
+            <td class="event-cell {% if not is_movement %}{{ lane_cls }}{% endif %}"
                 rowspan="{{ cell.rowspan }}"
                 data-event-id="{{ ev.id }}"
                 data-lane-id="{{ lane.id }}"
@@ -210,16 +211,17 @@
                 data-bs-placement="top"
                 data-bs-html="true"
                 title="{{ tooltip_text|replace('\n', '<br>') }}">
-              <div class="event-block">
+              <div class="event-block{% if is_movement %} event-type-movement{% endif %}">
                 <div class="resize-handle-top"></div>
                 <div class="event-header">
                   <div class="event-title-row">
+                    {% if is_movement %}<span class="movement-label">移動</span>{% endif %}
                     <div class="event-title">{{ ev.title }}</div>
                     {% if ev.duration_min %}
                     <div class="event-duration">⏱ {{ ev.duration_min }}分</div>
                     {% endif %}
                   </div>
-                  {% if ev.venue_name or ev.start_time %}
+                  {% if not is_movement and (ev.venue_name or ev.start_time) %}
                   <div class="event-meta">
                     {% if ev.venue_name %}📍 {{ ev.venue_name }}{% endif %}
                     {% if ev.start_time %}{{ ev.start_time }}-{{ ev.end_time }}{% endif %}
@@ -229,7 +231,9 @@
                 {% if ev.assignments %}
                 <div class="event-assignments">
                   {% for a in ev.assignments %}
-                  <div class="event-assignment">{{ a.role_name }}：{{ a.staff_name }}</div>
+                  <div class="event-assignment">
+                    {% if is_movement %}🚶 {{ a.staff_name }}{% else %}{{ a.role_name }}：{{ a.staff_name }}{% endif %}
+                  </div>
                   {% endfor %}
                 </div>
                 {% endif %}
@@ -284,22 +288,54 @@
   </div>
 
   <input type="hidden" id="p_event_id" value="">
+  <input type="hidden" id="p_event_type" value="normal">
 
-  <div class="mb-2">
-    <label class="form-label fw-bold small">タイトル *</label>
-    <input type="text" id="p_title" class="form-control form-control-sm" required oninput="updateTitleHelperText()">
-    <div id="p_title_helper" class="mt-1">
-      <select id="p_template" class="form-select form-select-sm" onchange="applyTemplate()">
-        <option value="">📋 テンプレートを選択すると自動入力されます</option>
-        {% for t in templates %}
-        <option value="{{ t.id }}" data-title="{{ t.title }}" data-note="{{ t.note or '' }}">
-          {{ t.title }}
-        </option>
+  {# ── 種別タブ ── #}
+  <div class="btn-group btn-group-sm w-100 mb-3" id="event-type-tabs" role="group">
+    <button type="button" class="btn btn-secondary active" id="tab-normal" onclick="switchEventType('normal')">📋 通常イベント</button>
+    <button type="button" class="btn btn-outline-secondary" id="tab-movement" onclick="switchEventType('movement')">🚶 移動</button>
+  </div>
+
+  {# ── 通常イベント専用フィールド ── #}
+  <div id="fields-normal">
+    <div class="mb-2">
+      <label class="form-label fw-bold small">タイトル *</label>
+      <input type="text" id="p_title" class="form-control form-control-sm" required oninput="updateTitleHelperText()">
+      <div id="p_title_helper" class="mt-1">
+        <select id="p_template" class="form-select form-select-sm" onchange="applyTemplate()">
+          <option value="">📋 テンプレートを選択すると自動入力されます</option>
+          {% for t in templates %}
+          <option value="{{ t.id }}" data-title="{{ t.title }}" data-note="{{ t.note or '' }}">
+            {{ t.title }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="mb-2">
+      <label class="form-label fw-bold small">会場</label>
+      <select id="p_venue_id" class="form-select form-select-sm">
+        {% for v in all_venues %}
+        <option value="{{ v.id }}">{{ v.name }}</option>
         {% endfor %}
       </select>
     </div>
+
+    <div class="mb-2">
+      <label class="form-label fw-bold small">備考</label>
+      <input type="text" id="p_note" class="form-control form-control-sm">
+    </div>
   </div>
 
+  {# ── 移動イベント専用フィールド ── #}
+  <div id="fields-movement" style="display:none">
+    <div class="alert alert-secondary py-1 px-2 mb-2 small">
+      🚶 移動イベント — タイトルは「移動」固定・会場・内容テンプレート不要
+    </div>
+  </div>
+
+  {# ── 共通フィールド ── #}
   <div class="mb-2">
     <label class="form-label fw-bold small">対象実施枠 * <span class="text-muted fw-normal">（複数選択可）</span></label>
     <div id="p_lane_checkboxes" class="d-flex flex-wrap gap-3 border rounded p-2 bg-light">
@@ -313,15 +349,6 @@
       {% endif %}
       {% endfor %}
     </div>
-  </div>
-
-  <div class="mb-2">
-    <label class="form-label fw-bold small">会場</label>
-    <select id="p_venue_id" class="form-select form-select-sm">
-      {% for v in all_venues %}
-      <option value="{{ v.id }}">{{ v.name }}</option>
-      {% endfor %}
-    </select>
   </div>
 
   <div class="row g-2 mb-2">
@@ -339,15 +366,10 @@
     </div>
   </div>
 
-  <div class="mb-2">
-    <label class="form-label fw-bold small">備考</label>
-    <input type="text" id="p_note" class="form-control form-control-sm">
-  </div>
-
   <div class="mb-3">
-    <label class="form-label fw-bold small">担当者割当</label>
+    <label class="form-label fw-bold small">担当者</label>
     <div id="p_assignments"></div>
-    <button type="button" class="btn btn-outline-primary btn-sm mt-1" onclick="addAssignment()">+ 担当者追加</button>
+    <button type="button" class="btn btn-outline-primary btn-sm mt-1" onclick="addAssignmentForType()">+ 担当者追加</button>
   </div>
 
   <div class="d-flex gap-2 mb-2">
@@ -355,7 +377,7 @@
     <button class="btn btn-secondary btn-sm" onclick="closePanel()">キャンセル</button>
     <button class="btn btn-danger btn-sm" id="btn-delete" style="display:none" onclick="deleteEvent()">削除</button>
   </div>
-  <div>
+  <div id="save-as-template-row">
     <button type="button" class="btn btn-outline-secondary btn-sm w-100"
             onclick="openSaveAsTemplate()"
             title="タイトル・所要時間・備考をテンプレートとして保存します">
@@ -798,6 +820,60 @@ function onDurationChange() {
   }
 }
 
+// ─── 種別切り替え ────────────────────────────────────────────
+function switchEventType(type) {
+  document.getElementById('p_event_type').value = type;
+  const isMovement = (type === 'movement');
+
+  // タブのアクティブ状態
+  document.getElementById('tab-normal').className   = 'btn btn-sm ' + (isMovement ? 'btn-outline-secondary' : 'btn-secondary active');
+  document.getElementById('tab-movement').className = 'btn btn-sm ' + (isMovement ? 'btn-secondary active' : 'btn-outline-secondary');
+
+  // 専用フィールドの表示切り替え
+  document.getElementById('fields-normal').style.display   = isMovement ? 'none' : '';
+  document.getElementById('fields-movement').style.display = isMovement ? '' : 'none';
+
+  // テンプレート保存ボタンは通常のみ
+  document.getElementById('save-as-template-row').style.display = isMovement ? 'none' : '';
+
+  // 担当者行を種別に合わせて再構築（役割セレクト列の有無）
+  const container = document.getElementById('p_assignments');
+  const existingRows = [...container.querySelectorAll('.asgn-row')];
+  if (existingRows.length > 0) {
+    // 既存行のスタッフIDを保持して作り直す
+    const staffIds = existingRows.map(r => r.querySelector('.asgn-staff')?.value || '');
+    container.innerHTML = '';
+    staffIds.forEach(sid => addAssignmentForType(parseInt(sid) || null));
+  }
+}
+
+function addAssignmentForType(staffId, roleId) {
+  const isMovement = document.getElementById('p_event_type').value === 'movement';
+  if (isMovement) {
+    addAssignmentMovement(staffId);
+  } else {
+    addAssignment(staffId, roleId);
+  }
+}
+
+function addAssignmentMovement(staffId) {
+  const container = document.getElementById('p_assignments');
+  const div = document.createElement('div');
+  div.className = 'asgn-row';
+
+  let staffOpts = '<option value="">担当者...</option>';
+  STAFF_LIST.forEach(s => {
+    const label = `${s.name}（${s.type}${s.dept ? '・' + s.dept : ''}${s.grade ? s.grade + '年' : ''}）`;
+    staffOpts += `<option value="${s.id}" ${s.id == staffId ? 'selected' : ''}>${label}</option>`;
+  });
+
+  div.innerHTML = `
+    <select class="form-select form-select-sm asgn-staff">${staffOpts}</select>
+    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.parentElement.remove()">&times;</button>
+  `;
+  container.appendChild(div);
+}
+
 function openPanelForNew(startTime, laneId, duration) {
   document.getElementById('panel-title').textContent = 'イベント登録';
   document.getElementById('p_event_id').value = '';
@@ -805,6 +881,7 @@ function openPanelForNew(startTime, laneId, duration) {
   document.getElementById('p_note').value = '';
   document.getElementById('p_template').selectedIndex = 0;
   document.getElementById('btn-delete').style.display = 'none';
+  switchEventType('normal');  // 常に通常イベントで開く
   updateTitleHelperText();
 
   // 実施枠チェックボックスをリセットして指定レーンだけチェック
@@ -830,15 +907,22 @@ function openPanelForEditById(eventId) {
   const ev = EVENT_MAP.find(e => e.id === eventId);
   if (!ev) return;
 
+  const evType = ev.event_type || 'normal';
+  switchEventType(evType);  // 種別に合わせてパネルを切り替え
+
   document.getElementById('panel-title').textContent = 'イベント編集';
   document.getElementById('p_event_id').value = ev.id;
-  document.getElementById('p_title').value = ev.title;
-  if (ev.venue_id) document.getElementById('p_venue_id').value = ev.venue_id;
-  document.getElementById('p_note').value = ev.note || '';
-  document.getElementById('p_template').selectedIndex = 0;
   document.getElementById('btn-delete').style.display = 'inline-block';
-  updateTitleHelperText();
   initTimeFields(ev.start_time, ev.end_time, ev.duration_min);
+
+  if (evType === 'normal') {
+    document.getElementById('p_title').value = ev.title;
+    if (ev.venue_id) document.getElementById('p_venue_id').value = ev.venue_id;
+    document.getElementById('p_note').value = ev.note || '';
+    document.getElementById('p_template').selectedIndex = 0;
+    updateTitleHelperText();
+  }
+  // movement の場合はタイトル「移動」固定なのでフィールドなし
 
   // 実施枠チェックボックス: グループ内の全実施枠をチェック
   document.querySelectorAll('.lane-cb').forEach(cb => cb.checked = false);
@@ -856,9 +940,13 @@ function openPanelForEditById(eventId) {
   const container = document.getElementById('p_assignments');
   container.innerHTML = '';
   if (ev.assignments && ev.assignments.length > 0) {
-    ev.assignments.forEach(a => addAssignment(a.staff_id, a.role_id));
+    if (evType === 'movement') {
+      ev.assignments.forEach(a => addAssignmentMovement(a.staff_id));
+    } else {
+      ev.assignments.forEach(a => addAssignment(a.staff_id, a.role_id));
+    }
   } else {
-    addAssignment();
+    addAssignmentForType();
   }
   openPanel();
 }
@@ -890,11 +978,18 @@ function addAssignment(staffId, roleId) {
 }
 
 function getAssignments() {
+  const isMovement = document.getElementById('p_event_type').value === 'movement';
   const result = [];
   document.querySelectorAll('.asgn-row').forEach(row => {
-    const staffId = row.querySelector('.asgn-staff').value;
-    const roleId = row.querySelector('.asgn-role').value;
-    if (staffId && roleId) result.push({ staff_id: parseInt(staffId), role_id: parseInt(roleId) });
+    const staffId = row.querySelector('.asgn-staff')?.value;
+    if (!staffId) return;
+    if (isMovement) {
+      // 役割はバックエンドで「移動引率」に固定するため、dummy 0 を送る
+      result.push({ staff_id: parseInt(staffId), role_id: 0 });
+    } else {
+      const roleId = row.querySelector('.asgn-role')?.value;
+      if (roleId) result.push({ staff_id: parseInt(staffId), role_id: parseInt(roleId) });
+    }
   });
   return result;
 }
@@ -943,22 +1038,35 @@ function updateTitleHelperText() {
 
 // ─── 保存・削除 ──────────────────────────────────────────────
 async function saveEvent() {
-  const eventId = document.getElementById('p_event_id').value;
-  const title = document.getElementById('p_title').value.trim();
-  const laneIds = Array.from(document.querySelectorAll('.lane-cb:checked')).map(cb => parseInt(cb.value));
-  const venueId = document.getElementById('p_venue_id').value;
-  const startTime = document.getElementById('p_start_time').value;
+  const eventId   = document.getElementById('p_event_id').value;
+  const evType    = document.getElementById('p_event_type').value || 'normal';
+  const isMovement = evType === 'movement';
+
+  // タイトル：移動は固定、通常は入力値
+  const title = isMovement ? '移動' : document.getElementById('p_title').value.trim();
+
+  const laneIds    = Array.from(document.querySelectorAll('.lane-cb:checked')).map(cb => parseInt(cb.value));
+  const venueId    = isMovement ? null : document.getElementById('p_venue_id').value;
+  const startTime  = document.getElementById('p_start_time').value;
   const durationMin = document.getElementById('p_duration_min').value;
 
-  if (!title || laneIds.length === 0 || !venueId || !startTime || !durationMin) {
-    alert('タイトル、対象実施枠（1つ以上）、会場、開始時刻、所要時間は必須です');
+  // バリデーション
+  if (!isMovement && !title) {
+    alert('タイトルを入力してください');
+    return;
+  }
+  if (laneIds.length === 0 || !startTime || !durationMin) {
+    alert('対象実施枠（1つ以上）、開始時刻、所要時間は必須です');
+    return;
+  }
+  if (!isMovement && !venueId) {
+    alert('会場を選択してください');
     return;
   }
 
   // ─── 各実施枠の時間重複チェック（フロント側事前確認） ─────────
   const endTime = document.getElementById('p_end_time').value;
   if (endTime) {
-    // 編集中イベントのグループ情報を取得（各実施枠の除外IDを正確に設定するため）
     const ev = eventId ? EVENT_MAP.find(e => e.id === parseInt(eventId)) : null;
     const groupEvents = ev && ev.event_group_id
       ? EVENT_MAP.filter(e => e.event_group_id === ev.event_group_id)
@@ -986,14 +1094,15 @@ async function saveEvent() {
   }
 
   const body = {
-    occasion_id: OCCASION_ID,
-    title: title,
+    occasion_id:      OCCASION_ID,
+    title:            title,
+    event_type:       evType,
     program_lane_ids: laneIds,
-    venue_id: parseInt(venueId),
-    start_time: startTime,
-    duration_min: parseInt(durationMin),
-    note: document.getElementById('p_note').value,
-    assignments: getAssignments(),
+    venue_id:         venueId ? parseInt(venueId) : null,
+    start_time:       startTime,
+    duration_min:     parseInt(durationMin),
+    note:             isMovement ? '' : (document.getElementById('p_note').value || ''),
+    assignments:      getAssignments(),
   };
 
   const url = eventId ? `/api/event/${eventId}/update` : '/api/event/create';
@@ -1218,9 +1327,11 @@ async function updateEventTimeAPI(eventId, newStart, newDurMin, newLaneIds) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       occasion_id: OCCASION_ID, title: ev.title,
-      program_lane_ids: laneIds, venue_id: ev.venue_id,
+      event_type: ev.event_type || 'normal',
+      program_lane_ids: laneIds, venue_id: ev.venue_id || null,
       start_time: newStart, duration_min: newDurMin,
-      note: ev.note, assignments: ev.assignments,
+      note: ev.note,
+      assignments: ev.assignments.map(a => ({ staff_id: a.staff_id, role_id: a.role_id })),
     }),
   });
   const data = await res.json();
@@ -1242,7 +1353,8 @@ async function copyEventAPI(eventId, newStart, newDurMin, targetLaneId) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       occasion_id: OCCASION_ID, title: ev.title,
-      program_lane_ids: [targetLaneId], venue_id: ev.venue_id,
+      event_type: ev.event_type || 'normal',
+      program_lane_ids: [targetLaneId], venue_id: ev.venue_id || null,
       start_time: newStart, duration_min: newDurMin,
       note: ev.note,
       assignments: ev.assignments.map(a => ({ staff_id: a.staff_id, role_id: a.role_id })),

@@ -135,10 +135,11 @@ def build_occasion_matrix(occasion_id: int, period: str = "all", lane_ids_filter
             "program_lane_id": e.program_lane_id,
             "program_lane_name": e.program_lane.name if e.program_lane else None,
             "venue_id": e.venue_id,
-            "venue_name": e.venue.name,
+            "venue_name": e.venue.name if e.venue else None,
             "note": e.note,
             "assignments": assignments,
             "event_group_id": e.event_group_id,
+            "event_type": e.event_type or "normal",
         }
 
     # セルマトリクス構築（列キー = program_lane_id）

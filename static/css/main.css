@@ -206,6 +206,43 @@
 .lane-color-3 .event-block { border-color: #9a3a9a; }
 .lane-color-4 .event-block { border-color: #9a9a3a; }
 
+/* ── 移動イベント ── */
+/* 実施枠色に関係なく固定スタイルで上書き */
+.event-block.event-type-movement {
+  background: repeating-linear-gradient(
+    -45deg,
+    #f0f0f0,
+    #f0f0f0 4px,
+    #e0e0e0 4px,
+    #e0e0e0 8px
+  ) !important;
+  border-color: #888 !important;
+  border-style: dashed !important;
+}
+.event-block.event-type-movement .event-title {
+  color: #444;
+}
+.event-block.event-type-movement .event-duration {
+  color: #555;
+}
+.event-block.event-type-movement .event-assignment {
+  color: #555;
+}
+/* 移動ラベルバッジ */
+.movement-label {
+  display: inline-block;
+  background: #888;
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-right: 3px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
 /* イベント内部レイアウト */
 .event-header {
   margin-bottom: 4px;
