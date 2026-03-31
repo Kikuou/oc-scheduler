@@ -211,11 +211,17 @@
                 data-bs-placement="top"
                 data-bs-html="true"
                 title="{{ tooltip_text|replace('\n', '<br>') }}">
-              <div class="event-block">
+              <div class="event-block {% if is_movement %}event-type-movement{% endif %}">
                 <div class="resize-handle-top"></div>
                 <div class="event-header">
                   <div class="event-title-row">
-                    <div class="event-title">{{ ev.title }}</div>
+                    <div class="event-title {% if is_movement %}movement{% endif %}">
+                      {% if is_movement %}
+                        🚶 移動
+                      {% else %}
+                        {{ ev.title }}
+                      {% endif %}
+                    </div>
                     {% if ev.duration_min %}
                     <div class="event-duration">⏱ {{ ev.duration_min }}分</div>
                     {% endif %}
