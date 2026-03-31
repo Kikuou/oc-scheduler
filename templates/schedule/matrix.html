@@ -201,7 +201,7 @@
             {% set tooltip_text = tooltip_lines|join("\n") %}
 
             {% set is_movement = ev.event_type == 'movement' %}
-            <td class="event-cell {% if not is_movement %}{{ lane_cls }}{% endif %}"
+            <td class="event-cell {{ lane_cls }}"
                 rowspan="{{ cell.rowspan }}"
                 data-event-id="{{ ev.id }}"
                 data-lane-id="{{ lane.id }}"
@@ -211,17 +211,16 @@
                 data-bs-placement="top"
                 data-bs-html="true"
                 title="{{ tooltip_text|replace('\n', '<br>') }}">
-              <div class="event-block{% if is_movement %} event-type-movement{% endif %}">
+              <div class="event-block">
                 <div class="resize-handle-top"></div>
                 <div class="event-header">
                   <div class="event-title-row">
-                    {% if is_movement %}<span class="movement-label">移動</span>{% endif %}
-                    {% if not is_movement %}<div class="event-title">{{ ev.title }}</div>{% endif %}
+                    <div class="event-title">{{ ev.title }}</div>
                     {% if ev.duration_min %}
                     <div class="event-duration">⏱ {{ ev.duration_min }}分</div>
                     {% endif %}
                   </div>
-                  {% if not is_movement and (ev.venue_name or ev.start_time) %}
+                  {% if ev.venue_name or ev.start_time %}
                   <div class="event-meta">
                     {% if ev.venue_name %}📍 {{ ev.venue_name }}{% endif %}
                     {% if ev.start_time %}{{ ev.start_time }}-{{ ev.end_time }}{% endif %}
@@ -231,9 +230,7 @@
                 {% if ev.assignments %}
                 <div class="event-assignments">
                   {% for a in ev.assignments %}
-                  <div class="event-assignment">
-                    {% if is_movement %}🚶 {{ a.staff_name }}{% else %}{{ a.role_name }}：{{ a.staff_name }}{% endif %}
-                  </div>
+                  <div class="event-assignment">{{ a.role_name }}：{{ a.staff_name }}</div>
                   {% endfor %}
                 </div>
                 {% endif %}
